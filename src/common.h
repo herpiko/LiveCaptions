@@ -18,9 +18,15 @@
 
 #pragma once
 
+#include "livecaptions-config.h"
+
 #define SWEAR_REPLACEMENT " [__]"
 
 #define LIVECAPTIONS_VERSION "0.4.1"
 
 #define MINIMUM_BENCHMARK_RESULT (0.6)
-#define GET_MODEL_PATH() (getenv("APRIL_MODEL_PATH") == NULL) ? "/app/LiveCaptions/models/aprilv0_en-us.april" : getenv("APRIL_MODEL_PATH")
+// Flatpak location of the built-in model; also the gschema default for active-model
+#define FLATPAK_MODEL_PATH "/app/LiveCaptions/models/aprilv0_en-us.april"
+#define IS_BUILTIN_MODEL(path) (g_str_equal((path), FLATPAK_MODEL_PATH) || g_str_equal((path), DEFAULT_MODEL_PATH))
+
+#define GET_MODEL_PATH() (getenv("APRIL_MODEL_PATH") == NULL) ? DEFAULT_MODEL_PATH : getenv("APRIL_MODEL_PATH")

@@ -1,0 +1,5 @@
+option('model_path',
+  type: 'string',
+  value: '/app/LiveCaptions/models/aprilv0_en-us.april',
+  description: 'Path of the built-in speech model (the APRIL_MODEL_PATH environment variable overrides it at runtime)'
+)

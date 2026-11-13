@@ -249,7 +249,7 @@ static void on_builtin_toggled(LiveCaptionsSettings *self) {
 
 static void on_model_deleted(GtkButton *button, LiveCaptionsSettings *self) {
     const char *model = g_quark_to_string((GQuark)g_object_get_data(G_OBJECT(button), "lcap-model-path"));
-    if(g_str_equal(model, "/app/LiveCaptions/models/aprilv0_en-us.april")) return;
+    if(IS_BUILTIN_MODEL(model)) return;
 
     char *active_model = g_settings_get_string(self->settings, "active-model");
     if(g_str_equal(model, active_model)) {
@@ -280,7 +280,7 @@ static void on_model_deleted(GtkButton *button, LiveCaptionsSettings *self) {
 }
 
 static void insert_model_to_list(LiveCaptionsSettings *self, gchar *model) {
-    if(g_str_equal(model, "/app/LiveCaptions/models/aprilv0_en-us.april")) return;
+    if(IS_BUILTIN_MODEL(model)) return;
 
     GtkCheckButton *first = self->radio_button_1;
     AdwActionRow *row = g_object_new(ADW_TYPE_ACTION_ROW, NULL);

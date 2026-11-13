@@ -19,6 +19,7 @@ gnome = import('gnome')
 config_h = configuration_data()
 config_h.set_quoted('PACKAGE_VERSION', meson.project_version())
 config_h.set_quoted('GETTEXT_PACKAGE', 'livecaptions')
+config_h.set_quoted('DEFAULT_MODEL_PATH', get_option('model_path'))
 config_h.set_quoted('LOCALEDIR', join_paths(get_option('prefix'), get_option('localedir')))
 configure_file(
   output: 'livecaptions-config.h',
