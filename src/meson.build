@@ -13,7 +13,8 @@ livecaptions_sources = [
   'window-helper.c',
   'history.c',
   'livecaptions-history-window.c',
-  'dbus-interface.c'
+  'dbus-interface.c',
+  'spectrum.c'
 ]
 
 cc = meson.get_compiler('c')

@@ -37,6 +37,9 @@ static void deinit_audio(LiveCaptionsApplication *self){
 static void init_audio(LiveCaptionsApplication *self) {
     deinit_audio(self);
 
+    // Listening is paused: keep the audio capture closed so nothing runs
+    if(!self->listening) return;
+
     gboolean use_microphone = g_settings_get_boolean(self->settings, "microphone");
     g_autofree char *desktop_source = g_settings_get_string(self->settings, "desktop-source");
     g_autofree char *microphone_source = g_settings_get_string(self->settings, "microphone-source");
@@ -104,6 +107,7 @@ static void livecaptions_application_activate(GApplication *app) {
         gtk_label_set_text(lc_window->label, " \n ");
 
         self->window = lc_window;
+        livecaptions_window_set_listening(lc_window, self->listening);
     }
 
     gtk_window_present(window);
@@ -315,6 +319,29 @@ livecaptions_application_toggle_microphone(GSimpleAction *action,
     g_simple_action_set_state(action, state);
 }
 
+static void
+livecaptions_application_toggle_listening(GSimpleAction *action,
+                                          GVariant      *state,
+                                          gpointer       user_data)
+{
+    LiveCaptionsApplication *self = LIVECAPTIONS_APPLICATION(user_data);
+    gboolean listening = g_variant_get_boolean(state);
+    if(listening == self->listening) return;
+
+    self->listening = listening;
+    g_simple_action_set_state(action, state);
+    if(self->window != NULL) livecaptions_window_set_listening(self->window, listening);
+
+    if(listening) {
+        init_audio(self);
+    } else {
+        // Finish the current utterance, then close audio capture; the
+        // recognizer goes idle once no more audio arrives
+        asr_thread_flush(self->asr);
+        deinit_audio(self);
+    }
+}
+
 static void livecaptions_application_init(LiveCaptionsApplication *self) {
     self->settings = g_settings_new("net.sapples.LiveCaptions");
 
@@ -340,6 +367,13 @@ static void livecaptions_application_init(LiveCaptionsApplication *self) {
     g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(mic_action));
 
     self->mic_action = mic_action;
+
+    // Not persisted: Live Captions always starts listening
+    self->listening = TRUE;
+    g_autoptr(GSimpleAction) listen_action = g_simple_action_new_stateful("listening", NULL, g_variant_new_boolean(TRUE));
+    g_signal_connect(listen_action, "change-state", G_CALLBACK(livecaptions_application_toggle_listening), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(listen_action));
+    self->listen_action = listen_action;
 
     gtk_application_set_accels_for_action(GTK_APPLICATION(self),
                                            "app.quit",

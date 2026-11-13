@@ -39,6 +39,7 @@
 #endif
 
 #include "asrproc.h"
+#include "spectrum.h"
 #include "line-gen.h"
 #include "livecaptions-window.h"
 #include "livecaptions-application.h"
@@ -561,6 +562,8 @@ static bool using_sherpa(asr_thread thread) {
 
 void asr_thread_enqueue_audio(asr_thread thread, short *data, size_t num_shorts) {
     if((thread->window == NULL) || thread->pause) return;
+
+    spectrum_feed(data, num_shorts);
 
     bool sherpa = using_sherpa(thread);
     if(!sherpa && ((thread->session == NULL) || (thread->model == NULL))) return;

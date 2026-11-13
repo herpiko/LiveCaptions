@@ -27,6 +27,8 @@ struct _LiveCaptionsApplication {
     AdwApplication parent_instance;
 
     GSimpleAction *mic_action;
+    GSimpleAction *listen_action;
+    gboolean listening;
 
     GSettings *settings;
     LiveCaptionsWindow *window;

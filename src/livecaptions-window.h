@@ -32,6 +32,8 @@ struct _LiveCaptionsWindow {
     GtkBox           *side_box;
     GtkBox           *side_box_tiny;
     GtkToggleButton  *mic_button;
+    GtkToggleButton  *listen_button;
+    GtkDrawingArea   *visualizer;
     GtkLabel         *label;
 
     GtkCssProvider *css_provider;
@@ -48,6 +50,10 @@ struct _LiveCaptionsWindow {
     volatile int max_text_width;
 
     gboolean was_errored;
+
+    guint visualizer_timer;
+    float visualizer_levels[32];
+    gboolean visualizer_idle;
 };
 
 G_BEGIN_DECLS
@@ -57,5 +63,8 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE (LiveCaptionsWindow, livecaptions_window, LIVECAPTIONS, WINDOW, GtkApplicationWindow);
 
 void livecaptions_window_warn_slow(LiveCaptionsWindow *self);
+
+// Shows whether audio is being captured; starts or stops the visualizer
+void livecaptions_window_set_listening(LiveCaptionsWindow *self, gboolean listening);
 
 G_END_DECLS

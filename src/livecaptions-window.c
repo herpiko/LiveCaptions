@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <string.h>
 #include "livecaptions-config.h"
 #include "livecaptions-window.h"
 #include "livecaptions-application.h"
@@ -23,18 +24,25 @@
 #include "audiocap.h"
 #include "window-helper.h"
 #include "history.h"
+#include "spectrum.h"
 
 
 G_DEFINE_TYPE(LiveCaptionsWindow, livecaptions_window, GTK_TYPE_APPLICATION_WINDOW)
 
+static void livecaptions_window_dispose(GObject *object);
+
 static void livecaptions_window_class_init (LiveCaptionsWindowClass *klass) {
     GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+
+    G_OBJECT_CLASS(klass)->dispose = livecaptions_window_dispose;
 
     gtk_widget_class_set_template_from_resource(widget_class, "/net/sapples/LiveCaptions/livecaptions-window.ui");
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, main);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, side_box);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, side_box_tiny);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, mic_button);
+    gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, listen_button);
+    gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, visualizer);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, label);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, too_slow_warning);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, slow_warning);
@@ -188,6 +196,81 @@ static gboolean show_relevant_slow_warning(void *userdata) {
     return G_SOURCE_CONTINUE;
 }
 
+G_STATIC_ASSERT(SPECTRUM_BANDS == G_N_ELEMENTS(((LiveCaptionsWindow *)0)->visualizer_levels));
+
+static void draw_visualizer(G_GNUC_UNUSED GtkDrawingArea *area, cairo_t *cr,
+                            int width, int height, gpointer user_data) {
+    LiveCaptionsWindow *self = user_data;
+
+    const double gap = 2.0;
+    double bar_w = (width - gap * (SPECTRUM_BANDS - 1)) / SPECTRUM_BANDS;
+    if(bar_w < 1.0) bar_w = 1.0;
+
+    for(int b = 0; b < SPECTRUM_BANDS; b++) {
+        double v = self->visualizer_levels[b];
+        double h = 1.0 + v * (height - 1.0);
+        double x = b * (bar_w + gap);
+
+        // Dim when quiet, brighter and greener as the band gets louder
+        cairo_set_source_rgba(cr, 0.55 - 0.4 * v, 0.75 + 0.2 * v, 0.6 - 0.2 * v, 0.25 + 0.6 * v);
+        cairo_rectangle(cr, x, height - h, bar_w, h);
+        cairo_fill(cr);
+    }
+}
+
+static gboolean tick_visualizer(gpointer user_data) {
+    LiveCaptionsWindow *self = user_data;
+
+    float levels[SPECTRUM_BANDS];
+    spectrum_get(levels);
+
+    gboolean all_zero = TRUE;
+    for(int b = 0; b < SPECTRUM_BANDS; b++) {
+        // Rise immediately, fall smoothly
+        float decayed = self->visualizer_levels[b] * 0.82f;
+        float v = levels[b] > decayed ? levels[b] : decayed;
+        if(v < 0.005f) v = 0.0f;
+        else all_zero = FALSE;
+        self->visualizer_levels[b] = v;
+    }
+
+    // During silence, draw the flat state once and then stop redrawing
+    if(all_zero && self->visualizer_idle) return G_SOURCE_CONTINUE;
+    self->visualizer_idle = all_zero;
+
+    gtk_widget_queue_draw(GTK_WIDGET(self->visualizer));
+    return G_SOURCE_CONTINUE;
+}
+
+void livecaptions_window_set_listening(LiveCaptionsWindow *self, gboolean listening) {
+    gtk_button_set_icon_name(GTK_BUTTON(self->listen_button),
+        listening ? "media-playback-pause-symbolic" : "media-playback-start-symbolic");
+    gtk_widget_set_tooltip_text(GTK_WIDGET(self->listen_button),
+        listening ? "Pause listening (stops audio capture to save power)"
+                  : "Listening paused. Click to resume captioning");
+
+    spectrum_reset();
+    memset(self->visualizer_levels, 0, sizeof(self->visualizer_levels));
+    self->visualizer_idle = FALSE;
+    gtk_widget_set_visible(GTK_WIDGET(self->visualizer), listening);
+
+    if(listening && self->visualizer_timer == 0) {
+        self->visualizer_timer = g_timeout_add(33, tick_visualizer, self);
+    } else if(!listening && self->visualizer_timer != 0) {
+        g_source_remove(self->visualizer_timer);
+        self->visualizer_timer = 0;
+    }
+}
+
+static void livecaptions_window_dispose(GObject *object) {
+    LiveCaptionsWindow *self = LIVECAPTIONS_WINDOW(object);
+    if(self->visualizer_timer != 0) {
+        g_source_remove(self->visualizer_timer);
+        self->visualizer_timer = 0;
+    }
+    G_OBJECT_CLASS(livecaptions_window_parent_class)->dispose(object);
+}
+
 static void livecaptions_window_init(LiveCaptionsWindow *self) {
     gtk_widget_init_template(GTK_WIDGET(self));
 
@@ -200,6 +283,9 @@ static void livecaptions_window_init(LiveCaptionsWindow *self) {
     g_signal_connect(self->settings, "changed", G_CALLBACK(on_settings_change), self);
     
     g_settings_bind(self->settings, "microphone", self->mic_button, "active", G_SETTINGS_BIND_DEFAULT);
+
+    self->visualizer_timer = 0;
+    gtk_drawing_area_set_draw_func(self->visualizer, draw_visualizer, self, NULL);
 
     self->font_layout = NULL;
     self->font_layout_counter = 0;

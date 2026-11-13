@@ -36,37 +36,51 @@
 
             <child>
               <object class="GtkBox" id="side_box">
-                <property name="margin-start">4</property>
+                <property name="margin-start">6</property>
+                <property name="margin-top">6</property>
+                <property name="margin-bottom">6</property>
+                <property name="spacing">4</property>
                 <property name="orientation">vertical</property>
                 <property name="valign">center</property>
                 <property name="visible">True</property>
 
                 <child>
                   <object class="GtkToggleButton" id="mic_button">
-                    <property name="margin-start">4</property>
-                    <property name="margin-end">4</property>
-                    <property name="margin-top">4</property>
-                    <property name="margin-bottom">4</property>
+                    <property name="margin-end">2</property>
                     <property name="valign">center</property>
                     <property name="icon-name">microphone2-symbolic</property>
                     <property name="tooltip-text">Also caption the microphone, mixed with desktop audio</property>
                     <style>
                       <class name="flat"/>
+                      <class name="side-button"/>
+                      <class name="mic-button"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkToggleButton" id="listen_button">
+                    <property name="margin-end">2</property>
+                    <property name="valign">center</property>
+                    <property name="icon-name">media-playback-pause-symbolic</property>
+                    <property name="action-name">app.listening</property>
+                    <property name="tooltip-text">Pause listening (stops audio capture to save power)</property>
+                    <style>
+                      <class name="flat"/>
+                      <class name="side-button"/>
+                      <class name="listen-button"/>
                     </style>
                   </object>
                 </child>
                 <child>
                   <object class="GtkButton">
-                    <property name="margin-start">4</property>
-                    <property name="margin-end">4</property>
-                    <property name="margin-top">4</property>
-                    <property name="margin-bottom">4</property>
+                    <property name="margin-end">2</property>
                     <property name="valign">center</property>
                     <property name="icon-name">settings-symbolic</property>
                     <property name="action-name">app.preferences</property>
                     <property name="tooltip-text">Adjust preferences</property>
                     <style>
                       <class name="flat"/>
+                      <class name="side-button"/>
                     </style>
                   </object>
                 </child>
@@ -122,6 +136,18 @@
                 </child>
 
                 <child type="overlay">
+                  <object class="GtkDrawingArea" id="visualizer">
+                    <property name="halign">fill</property>
+                    <property name="valign">end</property>
+                    <property name="height-request">10</property>
+                    <property name="margin-end">30</property>
+                    <property name="margin-bottom">1</property>
+                    <property name="can-target">False</property>
+                    <property name="can-focus">False</property>
+                  </object>
+                </child>
+
+                <child type="overlay">
                   <object class="GtkWindowControls">
                     <property name="halign">end</property>
                     <property name="valign">start</property>
@@ -158,7 +184,7 @@
                     <property name="icon-name">slow-icon-symbolic</property>
                     <property name="tooltip-text">Processing can't keep up. Accuracy may be affected.</property>
                   </object>
-                </child>ild>
+                </child>
 
                 <child type="overlay">
                   <object class="GtkImage" id="slowest_warning">
@@ -187,6 +213,10 @@
       <item>
         <attribute name="label" translatable="yes">_Microphone Captioning</attribute>
         <attribute name="action">app.microphone</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">_Listening</attribute>
+        <attribute name="action">app.listening</attribute>
       </item>
       <item>
         <attribute name="label" translatable="yes">_Preferences</attribute>
