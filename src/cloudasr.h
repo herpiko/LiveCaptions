@@ -21,9 +21,11 @@ typedef void (*cloud_result_cb)(void *userdata, cloud_result_type type, const ch
 
 cloud_asr *cloud_asr_new(cloud_result_cb cb, void *userdata);
 
-// Sets the API key, model and latency ("minimal".."xhigh"). Reconnects on the
-// next audio if anything changed. A NULL or empty key disables the client.
-void cloud_asr_configure(cloud_asr *c, const char *api_key, const char *model, const char *delay);
+// Sets the API key, model, latency ("minimal".."xhigh") and expected languages
+// (comma-separated ISO-639-1 codes such as "en,id"; empty to detect any).
+// Reconnects on the next audio if anything changed. A NULL or empty key
+// disables the client.
+void cloud_asr_configure(cloud_asr *c, const char *api_key, const char *model, const char *delay, const char *languages);
 
 // Queue audio (16 kHz mono PCM16) for sending; connects if needed
 void cloud_asr_feed(cloud_asr *c, const short *pcm, size_t count);

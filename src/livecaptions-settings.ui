@@ -332,6 +332,23 @@
             </child>
 
             <child>
+              <object class="AdwComboRow" id="cloud_language_row">
+                <property name="title" translatable="yes">Language</property>
+                <property name="subtitle" translatable="yes">gpt-live-transcribe and gpt-transcribe switch between the chosen languages; gpt-realtime-whisper detects the language itself when more than one is chosen</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item translatable="yes">English</item>
+                      <item translatable="yes">Indonesian</item>
+                      <item translatable="yes">English and Indonesian</item>
+                      <item translatable="yes">Any language (detect automatically)</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
+
+            <child>
               <object class="AdwComboRow" id="cloud_delay_row">
                 <property name="title" translatable="yes">Latency</property>
                 <property name="subtitle" translatable="yes">Waiting longer gives the model more context and more accurate text</property>

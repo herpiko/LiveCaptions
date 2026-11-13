@@ -56,7 +56,7 @@ char *asr_find_refine_model(void);
 void asr_thread_set_refine_model(asr_thread thread, const char *model_path);
 // Use OpenAI's Realtime API instead of the local model; a NULL/empty key goes
 // back to the local model. Does nothing when built without cloud support.
-void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *model, const char *delay);
+void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *model, const char *delay, const char *languages);
 // A message to show instead of captions (e.g. a cloud error), or NULL. Caller frees.
 char *asr_thread_get_status(asr_thread thread);
 // True if this build includes OpenAI cloud transcription

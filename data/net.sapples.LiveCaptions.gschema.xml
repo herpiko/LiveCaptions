@@ -61,6 +61,11 @@
             <summary>OpenAI latency setting: minimal, low, medium, high or xhigh</summary>
         </key>
 
+        <key name="cloud-languages" type="s">
+            <default>'en'</default>
+            <summary>Expected spoken languages for OpenAI, comma-separated ISO-639-1 codes (empty detects any language)</summary>
+        </key>
+
         <key name="transparent-window" type="b">
             <default>false</default>
             <summary>Make window transparent</summary>

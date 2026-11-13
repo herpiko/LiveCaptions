@@ -64,6 +64,7 @@ struct _LiveCaptionsSettings {
     AdwEntryRow *cloud_key_row;
     AdwComboRow *cloud_model_row;
     AdwComboRow *cloud_delay_row;
+    AdwComboRow *cloud_language_row;
 };
 
 G_BEGIN_DECLS

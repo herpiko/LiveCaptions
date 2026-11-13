@@ -244,6 +244,27 @@ static void bind_string_combo(LiveCaptionsSettings *self, AdwComboRow *row, cons
     g_signal_connect(row, "notify::selected", G_CALLBACK(on_string_combo_selected), self);
 }
 
+// Values of the Language row's entries, in order
+static const char *const CLOUD_LANGUAGES[] = { "en", "id", "en,id", "" };
+
+static void on_cloud_language_selected(AdwComboRow *row, G_GNUC_UNUSED GParamSpec *pspec, gpointer user_data) {
+    LiveCaptionsSettings *self = user_data;
+    guint i = adw_combo_row_get_selected(row);
+    if(i >= G_N_ELEMENTS(CLOUD_LANGUAGES)) return;
+    g_settings_set_string(self->settings, "cloud-languages", CLOUD_LANGUAGES[i]);
+}
+
+static void init_cloud_language_row(LiveCaptionsSettings *self) {
+    g_autofree char *current = g_settings_get_string(self->settings, "cloud-languages");
+    for(guint i = 0; i < G_N_ELEMENTS(CLOUD_LANGUAGES); i++) {
+        if(g_str_equal(current, CLOUD_LANGUAGES[i])) {
+            adw_combo_row_set_selected(self->cloud_language_row, i);
+            break;
+        }
+    }
+    g_signal_connect(self->cloud_language_row, "notify::selected", G_CALLBACK(on_cloud_language_selected), self);
+}
+
 static void on_cloud_toggled(GtkCheckButton *button, LiveCaptionsSettings *self) {
     if(gtk_check_button_get_active(button)) g_settings_set_boolean(self->settings, "cloud-enabled", true);
 }
@@ -278,6 +299,7 @@ static void init_cloud_group(LiveCaptionsSettings *self) {
 
     bind_string_combo(self, self->cloud_model_row, "cloud-model");
     bind_string_combo(self, self->cloud_delay_row, "cloud-delay");
+    init_cloud_language_row(self);
 #ifdef LIVE_CAPTIONS_CLOUD
     update_cloud_key_state(self);
 #endif
@@ -320,6 +342,7 @@ static void livecaptions_settings_class_init(LiveCaptionsSettingsClass *klass) {
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_key_row);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_model_row);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_delay_row);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_language_row);
 
     gtk_widget_class_bind_template_callback (widget_class, report_cb);
     gtk_widget_class_bind_template_callback (widget_class, about_cb);

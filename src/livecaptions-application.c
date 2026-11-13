@@ -67,7 +67,8 @@ void livecaptions_application_apply_cloud(LiveCaptionsApplication *self) {
 
     g_autofree char *model = g_settings_get_string(self->settings, "cloud-model");
     g_autofree char *delay = g_settings_get_string(self->settings, "cloud-delay");
-    asr_thread_set_cloud(self->asr, key, model, delay);
+    g_autofree char *languages = g_settings_get_string(self->settings, "cloud-languages");
+    asr_thread_set_cloud(self->asr, key, model, delay, languages);
 #else
     (void)self;
 #endif
@@ -298,7 +299,7 @@ static void on_settings_change(G_GNUC_UNUSED GSettings *settings,
         // Desktop audio is always captured; the microphone only when enabled
         if(g_str_equal(key, "desktop-source") || g_settings_get_boolean(self->settings, "microphone"))
             init_audio(self);
-    }else if(g_str_equal(key, "cloud-enabled") || g_str_equal(key, "cloud-model") || g_str_equal(key, "cloud-delay")) {
+    }else if(g_str_equal(key, "cloud-enabled") || g_str_equal(key, "cloud-model") || g_str_equal(key, "cloud-delay") || g_str_equal(key, "cloud-languages")) {
         livecaptions_application_apply_cloud(self);
     }else if(g_str_equal(key, "refine-finished-lines")) {
         apply_refine_setting(self);

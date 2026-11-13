@@ -54,6 +54,7 @@ struct cloud_asr {
     char *api_key;
     char *model;
     char *delay;
+    char *languages;
     guint config_gen;
     GByteArray *pending;      // resampled PCM16 waiting to be sent
     bool commit_requested;
@@ -206,7 +207,7 @@ static void send_text(cloud_asr *c, const char *text) {
     soup_websocket_connection_send_text(c->ws, text);
 }
 
-static void send_session_update(cloud_asr *c, const char *model, const char *delay) {
+static void send_session_update(cloud_asr *c, const char *model, const char *delay, const char *languages) {
     g_autoptr(JsonBuilder) b = json_builder_new();
     json_builder_begin_object(b);
     json_builder_set_member_name(b, "type");
@@ -232,15 +233,31 @@ static void send_session_update(cloud_asr *c, const char *model, const char *del
                     json_builder_set_member_name(b, "model");
                     json_builder_add_string_value(b, model);
 
-                    // gpt-live-transcribe takes a list of languages, the others a single one
-                    if(g_str_equal(model, "gpt-live-transcribe")) {
+                    // Expected languages, comma separated ("" = detect any).
+                    // gpt-live-transcribe and gpt-transcribe take a list and
+                    // switch between its languages; the others take a single
+                    // language, so with several we leave it out and let the
+                    // model detect it.
+                    g_auto(GStrv) langs = g_strsplit(languages != NULL ? languages : "", ",", -1);
+                    guint n_langs = 0;
+                    for(guint i = 0; langs[i] != NULL; i++) {
+                        g_strstrip(langs[i]);
+                        if(langs[i][0] != '\0') n_langs++;
+                    }
+
+                    bool takes_list = g_str_equal(model, "gpt-live-transcribe") || g_str_equal(model, "gpt-transcribe");
+                    if(takes_list && n_langs > 0) {
                         json_builder_set_member_name(b, "languages");
                         json_builder_begin_array(b);
-                        json_builder_add_string_value(b, "en");
+                        for(guint i = 0; langs[i] != NULL; i++)
+                            if(langs[i][0] != '\0') json_builder_add_string_value(b, langs[i]);
                         json_builder_end_array(b);
-                    } else {
-                        json_builder_set_member_name(b, "language");
-                        json_builder_add_string_value(b, "en");
+                    } else if(!takes_list && n_langs == 1) {
+                        for(guint i = 0; langs[i] != NULL; i++) {
+                            if(langs[i][0] == '\0') continue;
+                            json_builder_set_member_name(b, "language");
+                            json_builder_add_string_value(b, langs[i]);
+                        }
                     }
 
                     // Latency/accuracy trade-off of the streaming models
@@ -364,10 +381,12 @@ static void on_connected(GObject *source, GAsyncResult *res, gpointer userdata) 
     g_mutex_lock(&c->lock);
     g_autofree char *model = g_strdup(c->model);
     g_autofree char *delay = g_strdup(c->delay);
+    g_autofree char *languages = g_strdup(c->languages);
     g_mutex_unlock(&c->lock);
 
-    send_session_update(c, model, delay);
-    printf("OpenAI realtime transcription connected (%s, delay %s)\n", model, delay ? delay : "default");
+    send_session_update(c, model, delay, languages);
+    printf("OpenAI realtime transcription connected (%s, delay %s, languages %s)\n", model,
+           delay ? delay : "default", (languages && languages[0]) ? languages : "auto");
 
     // Send what was captured while connecting
     g_mutex_lock(&c->lock);
@@ -434,7 +453,7 @@ cloud_asr *cloud_asr_new(cloud_result_cb cb, void *userdata) {
     return c;
 }
 
-void cloud_asr_configure(cloud_asr *c, const char *api_key, const char *model, const char *delay) {
+void cloud_asr_configure(cloud_asr *c, const char *api_key, const char *model, const char *delay, const char *languages) {
     g_mutex_lock(&c->lock);
     g_clear_pointer(&c->api_key, g_free);
     if(api_key != NULL && api_key[0] != '\0') c->api_key = g_strdup(api_key);
@@ -442,6 +461,8 @@ void cloud_asr_configure(cloud_asr *c, const char *api_key, const char *model, c
     c->model = g_strdup(model != NULL && model[0] != '\0' ? model : "gpt-realtime-whisper");
     g_free(c->delay);
     c->delay = g_strdup(delay);
+    g_free(c->languages);
+    c->languages = g_strdup(languages);
     c->config_gen++;
     g_byte_array_set_size(c->pending, 0);
     g_clear_pointer(&c->status, g_free);
@@ -523,6 +544,7 @@ void cloud_asr_free(cloud_asr *c) {
     g_free(c->api_key);
     g_free(c->model);
     g_free(c->delay);
+    g_free(c->languages);
     g_free(c->status);
     g_mutex_clear(&c->lock);
     g_free(c);

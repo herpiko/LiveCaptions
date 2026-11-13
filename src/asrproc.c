@@ -1183,12 +1183,12 @@ static void cloud_result_handler(void *userdata, cloud_result_type type, const c
 }
 #endif
 
-void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *model, const char *delay) {
+void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *model, const char *delay, const char *languages) {
 #ifdef LIVE_CAPTIONS_CLOUD
     bool active = api_key != NULL && api_key[0] != '\0';
 
     if(active && thread->cloud == NULL) thread->cloud = cloud_asr_new(cloud_result_handler, thread);
-    if(thread->cloud != NULL) cloud_asr_configure(thread->cloud, active ? api_key : NULL, model, delay);
+    if(thread->cloud != NULL) cloud_asr_configure(thread->cloud, active ? api_key : NULL, model, delay, languages);
 
     if(active != thread->cloud_active) {
         // Finish whatever the previous engine was in the middle of
@@ -1209,7 +1209,7 @@ void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *mo
         }
     }
 #else
-    (void)thread; (void)api_key; (void)model; (void)delay;
+    (void)thread; (void)api_key; (void)model; (void)delay; (void)languages;
 #endif
 }
 
