@@ -54,6 +54,13 @@ char *asr_find_refine_model(void);
 // Re-transcribe each finished utterance with an offline model; NULL turns it off.
 // Loads in the background. Only applies when the live model is a sherpa-onnx one.
 void asr_thread_set_refine_model(asr_thread thread, const char *model_path);
+// Use OpenAI's Realtime API instead of the local model; a NULL/empty key goes
+// back to the local model. Does nothing when built without cloud support.
+void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *model, const char *delay);
+// A message to show instead of captions (e.g. a cloud error), or NULL. Caller frees.
+char *asr_thread_get_status(asr_thread thread);
+// True if this build includes OpenAI cloud transcription
+bool asr_cloud_supported(void);
 // Short name to show for a model path (caller frees)
 char *asr_model_display_name(const char *model_path);
 void asr_thread_flush(asr_thread thread);

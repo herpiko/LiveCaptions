@@ -52,6 +52,9 @@ void livecaptions_application_finish_setup(LiveCaptionsApplication *self, gdoubl
 LiveCaptionsApplication *livecaptions_application_new (gchar *application_id,
                                                        GApplicationFlags  flags);
 
+// Re-reads the cloud transcription settings and API key
+void livecaptions_application_apply_cloud(LiveCaptionsApplication *self);
+
 void livecaptions_application_stream_text(LiveCaptionsApplication *self, const char* text);
 
 G_END_DECLS

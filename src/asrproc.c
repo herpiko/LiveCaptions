@@ -40,6 +40,9 @@
 
 #include "asrproc.h"
 #include "spectrum.h"
+#ifdef LIVE_CAPTIONS_CLOUD
+#include "cloudasr.h"
+#endif
 #include "line-gen.h"
 #include "livecaptions-window.h"
 #include "livecaptions-application.h"
@@ -89,6 +92,14 @@ struct asr_thread_i {
     volatile gint refine_generation;
     GArray *utterance_audio; // float samples of the current utterance (worker thread only)
     bool utterance_overflow;
+#endif
+
+#ifdef LIVE_CAPTIONS_CLOUD
+    // OpenAI Realtime transcription; replaces the local model while active
+    cloud_asr *cloud;
+    volatile bool cloud_active;
+    bool cloud_committed;
+    size_t cloud_turn_samples;
 #endif
 
     LiveCaptionsWindow *window;
@@ -767,6 +778,41 @@ void asr_thread_enqueue_audio(asr_thread thread, short *data, size_t num_shorts)
 
     spectrum_feed(data, num_shorts);
 
+#ifdef LIVE_CAPTIONS_CLOUD
+    if(thread->cloud_active) {
+        bool loud = false, any = false;
+        for(size_t i = 0; i < num_shorts; i++) {
+            if(data[i] > 16 || data[i] < -16) any = true;
+            if(data[i] > 1000 || data[i] < -1000) { loud = true; break; }
+        }
+        thread->silence_counter = any ? 0 : (thread->silence_counter + num_shorts);
+
+        // The speaker paused: finish the turn, and don't pay to upload silence
+        if(thread->silence_counter >= 24000) {
+            thread->silence_counter = 24000;
+            if(!thread->cloud_committed) {
+                cloud_asr_commit(thread->cloud);
+                thread->cloud_committed = true;
+                thread->cloud_turn_samples = 0;
+            }
+            return;
+        }
+
+        thread->cloud_committed = false;
+        thread->sound_counter += num_shorts;
+        cloud_asr_feed(thread->cloud, data, num_shorts);
+
+        // Long stretches without a pause: end the turn at a quiet moment
+        // after 15 s (or regardless after 25 s) so final text keeps coming
+        thread->cloud_turn_samples += num_shorts;
+        if((thread->cloud_turn_samples > 15 * 16000 && !loud) || thread->cloud_turn_samples > 25 * 16000) {
+            cloud_asr_commit(thread->cloud);
+            thread->cloud_turn_samples = 0;
+        }
+        return;
+    }
+#endif
+
     bool sherpa = using_sherpa(thread);
     if(!sherpa && ((thread->session == NULL) || (thread->model == NULL))) return;
 
@@ -826,6 +872,9 @@ gpointer asr_thread_get_session(asr_thread thread) {
 }
 
 float asr_thread_get_speedup(asr_thread thread) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    if(thread->cloud_active) return 1.0f;
+#endif
 #ifdef LIVE_CAPTIONS_SHERPA
     if(using_sherpa(thread)) {
         // Report backlog the same way April reports how much it must speed up
@@ -1088,7 +1137,97 @@ bool asr_thread_is_errored(asr_thread thread) {
 }
 
 bool asr_thread_is_loaded(asr_thread thread) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    if(thread->cloud_active) return true;
+#endif
     return (thread->session != NULL) || using_sherpa(thread);
+}
+
+#ifdef LIVE_CAPTIONS_CLOUD
+// Splits cloud text into word tokens for the line generator
+static void cloud_result_handler(void *userdata, cloud_result_type type, const char *text) {
+    asr_thread data = userdata;
+    if(!data->cloud_active) return;
+
+    g_auto(GStrv) words = g_strsplit_set(text, " \t\n", -1);
+    GPtrArray *texts = g_ptr_array_new_with_free_func(g_free);
+    for(int i = 0; words[i] != NULL; i++) {
+        if(words[i][0] == '\0') continue;
+        g_ptr_array_add(texts, g_strconcat(" ", words[i], NULL));
+    }
+
+    AprilToken *tokens = g_new0(AprilToken, texts->len > 0 ? texts->len : 1);
+    for(guint i = 0; i < texts->len; i++) {
+        const char *w = g_ptr_array_index(texts, i);
+        size_t len = strlen(w);
+        char last = len > 0 ? w[len - 1] : '\0';
+
+        tokens[i].token = w;
+        tokens[i].logprob = 6.0f;
+        tokens[i].flags = APRIL_TOKEN_FLAG_WORD_BOUNDARY_BIT;
+        if(last == '.' || last == '!' || last == '?') tokens[i].flags |= APRIL_TOKEN_FLAG_SENTENCE_END_BIT;
+    }
+
+    // Cloud transcripts are properly cased and punctuated
+    data->line.preserve_case = true;
+
+    if(type == CLOUD_RESULT_FINAL) {
+        if(texts->len > 0) april_result_handler(data, APRIL_RESULT_RECOGNITION_FINAL, texts->len, tokens);
+        april_result_handler(data, APRIL_RESULT_SILENCE, 0, NULL);
+    } else if(texts->len > 0) {
+        april_result_handler(data, APRIL_RESULT_RECOGNITION_PARTIAL, texts->len, tokens);
+    }
+
+    g_free(tokens);
+    g_ptr_array_unref(texts);
+}
+#endif
+
+void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *model, const char *delay) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    bool active = api_key != NULL && api_key[0] != '\0';
+
+    if(active && thread->cloud == NULL) thread->cloud = cloud_asr_new(cloud_result_handler, thread);
+    if(thread->cloud != NULL) cloud_asr_configure(thread->cloud, active ? api_key : NULL, model, delay);
+
+    if(active != thread->cloud_active) {
+        // Finish whatever the previous engine was in the middle of
+        if(!active) cloud_asr_commit(thread->cloud);
+        thread->cloud_active = active;
+        thread->cloud_committed = false;
+        thread->cloud_turn_samples = 0;
+        thread->silence_counter = 0;
+
+        if(!active) {
+            // Back to the local model's casing
+            bool cased = false;
+#ifdef LIVE_CAPTIONS_SHERPA
+            if(thread->sherpa_recognizer != NULL)
+                cased = thread->sherpa_cased || (thread->refine_recognizer != NULL && thread->refine_cased);
+#endif
+            thread->line.preserve_case = cased;
+        }
+    }
+#else
+    (void)thread; (void)api_key; (void)model; (void)delay;
+#endif
+}
+
+char *asr_thread_get_status(asr_thread thread) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    if(thread->cloud_active && thread->cloud != NULL) return cloud_asr_get_status(thread->cloud);
+#else
+    (void)thread;
+#endif
+    return NULL;
+}
+
+bool asr_cloud_supported(void) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    return true;
+#else
+    return false;
+#endif
 }
 
 void asr_thread_set_main_window(asr_thread thread, LiveCaptionsWindow *window) {
@@ -1096,6 +1235,12 @@ void asr_thread_set_main_window(asr_thread thread, LiveCaptionsWindow *window) {
 }
 
 void asr_thread_flush(asr_thread thread) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    if(thread->cloud_active) {
+        cloud_asr_commit(thread->cloud);
+        return;
+    }
+#endif
 #ifdef LIVE_CAPTIONS_SHERPA
     if(using_sherpa(thread)) {
         struct sherpa_chunk *chunk = g_malloc0(sizeof(struct sherpa_chunk));
@@ -1110,6 +1255,12 @@ void asr_thread_flush(asr_thread thread) {
 
 void free_asr_thread(asr_thread thread) {
     thread->ending = true;
+
+#ifdef LIVE_CAPTIONS_CLOUD
+    thread->cloud_active = false;
+    if(thread->cloud != NULL) cloud_asr_free(thread->cloud);
+    thread->cloud = NULL;
+#endif
 
 #ifdef LIVE_CAPTIONS_SHERPA
     sherpa_stop_worker(thread);

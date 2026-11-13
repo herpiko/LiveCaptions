@@ -316,6 +316,60 @@
         </child>
 
         <child>
+          <object class="AdwPreferencesGroup" id="cloud_group">
+            <property name="title" translatable="yes">Cloud Transcription (OpenAI)</property>
+            <property name="description" translatable="yes">Sends your audio to OpenAI and is billed to your API account per minute of speech. While on, it replaces the local model.</property>
+
+            <child>
+              <object class="AdwSwitchRow" id="cloud_switch">
+                <property name="title" translatable="yes">Use OpenAI</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="AdwPasswordEntryRow" id="cloud_key_row">
+                <property name="title" translatable="yes">API Key</property>
+                <property name="show-apply-button">True</property>
+                <signal name="apply" handler="on_cloud_key_apply" swapped="yes"/>
+              </object>
+            </child>
+
+            <child>
+              <object class="AdwComboRow" id="cloud_model_row">
+                <property name="title" translatable="yes">Model</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item>gpt-realtime-whisper</item>
+                      <item>gpt-live-transcribe</item>
+                      <item>gpt-transcribe</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
+
+            <child>
+              <object class="AdwComboRow" id="cloud_delay_row">
+                <property name="title" translatable="yes">Latency</property>
+                <property name="subtitle" translatable="yes">Waiting longer gives the model more context and more accurate text</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item>minimal</item>
+                      <item>low</item>
+                      <item>medium</item>
+                      <item>high</item>
+                      <item>xhigh</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
           <object class="AdwPreferencesGroup">
             <property name="title"></property>
 

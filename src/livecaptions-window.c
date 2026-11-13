@@ -171,6 +171,14 @@ static gboolean show_relevant_slow_warning(void *userdata) {
         gtk_label_set_text(self->label, "");
     }
 
+    // Problems worth telling the user about, e.g. a rejected OpenAI key
+    g_autofree char *status = asr_thread_get_status(asr);
+    if(status != NULL) {
+        gtk_label_set_text(self->label, status);
+        self->was_errored = true;
+        return G_SOURCE_CONTINUE;
+    }
+
     if(!asr_thread_is_loaded(asr)) return G_SOURCE_CONTINUE;
 
     float speedup = asr_thread_get_speedup(asr);

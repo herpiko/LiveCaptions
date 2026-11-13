@@ -27,6 +27,9 @@
 #include "livecaptions-history-window.h"
 #include "asrproc.h"
 #include "audiocap.h"
+#ifdef LIVE_CAPTIONS_CLOUD
+#include "secret-store.h"
+#endif
 
 G_DEFINE_TYPE(LiveCaptionsSettings, livecaptions_settings, ADW_TYPE_PREFERENCES_WINDOW)
 
@@ -174,6 +177,83 @@ static void add_model_cb(LiveCaptionsSettings *self) {
 
 static void on_builtin_toggled(LiveCaptionsSettings *self);
 
+#ifdef LIVE_CAPTIONS_CLOUD
+static void update_cloud_key_state(LiveCaptionsSettings *self) {
+    bool saved = secret_store_has_openai_key();
+    bool from_env = !saved && g_getenv("OPENAI_API_KEY") != NULL;
+
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(self->cloud_key_row),
+        saved ? _("API Key (saved in keyring; enter a new one to replace it, or apply empty to remove it)")
+              : from_env ? _("API Key (using $OPENAI_API_KEY)") : _("API Key"));
+
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(self->cloud_switch),
+        (saved || from_env) ? "" : _("Enter your OpenAI API key below first"));
+}
+#endif
+
+static void on_cloud_key_apply(LiveCaptionsSettings *self) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    const char *key = gtk_editable_get_text(GTK_EDITABLE(self->cloud_key_row));
+    g_autofree char *trimmed = g_strstrip(g_strdup(key));
+
+    if(!secret_store_set_openai_key(trimmed)) {
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(self->cloud_key_row),
+            _("API Key (couldn't save it to the keyring)"));
+        return;
+    }
+
+    // Don't leave the key sitting in the entry
+    gtk_editable_set_text(GTK_EDITABLE(self->cloud_key_row), "");
+    update_cloud_key_state(self);
+
+    if(self->application != NULL) livecaptions_application_apply_cloud(self->application);
+#else
+    (void)self;
+#endif
+}
+
+// Keeps a combo row of strings in sync with a string setting
+static void on_string_combo_selected(GObject *row, G_GNUC_UNUSED GParamSpec *pspec, gpointer user_data) {
+    LiveCaptionsSettings *self = user_data;
+    const char *key = g_object_get_data(row, "settings-key");
+    GObject *item = adw_combo_row_get_selected_item(ADW_COMBO_ROW(row));
+    if(key == NULL || item == NULL) return;
+
+    const char *value = gtk_string_object_get_string(GTK_STRING_OBJECT(item));
+    g_autofree char *current = g_settings_get_string(self->settings, key);
+    if(!g_str_equal(current, value)) g_settings_set_string(self->settings, key, value);
+}
+
+static void bind_string_combo(LiveCaptionsSettings *self, AdwComboRow *row, const char *key) {
+    g_autofree char *current = g_settings_get_string(self->settings, key);
+    GListModel *model = adw_combo_row_get_model(row);
+
+    for(guint i = 0; i < g_list_model_get_n_items(model); i++) {
+        g_autoptr(GtkStringObject) item = g_list_model_get_item(model, i);
+        if(g_str_equal(gtk_string_object_get_string(item), current)) {
+            adw_combo_row_set_selected(row, i);
+            break;
+        }
+    }
+
+    g_object_set_data_full(G_OBJECT(row), "settings-key", g_strdup(key), g_free);
+    g_signal_connect(row, "notify::selected", G_CALLBACK(on_string_combo_selected), self);
+}
+
+static void init_cloud_group(LiveCaptionsSettings *self) {
+    if(!asr_cloud_supported()) {
+        gtk_widget_set_visible(GTK_WIDGET(self->cloud_group), false);
+        return;
+    }
+
+    g_settings_bind(self->settings, "cloud-enabled", self->cloud_switch, "active", G_SETTINGS_BIND_DEFAULT);
+    bind_string_combo(self, self->cloud_model_row, "cloud-model");
+    bind_string_combo(self, self->cloud_delay_row, "cloud-delay");
+#ifdef LIVE_CAPTIONS_CLOUD
+    update_cloud_key_state(self);
+#endif
+}
+
 static void livecaptions_settings_class_init(LiveCaptionsSettingsClass *klass) {
     GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 
@@ -207,6 +287,11 @@ static void livecaptions_settings_class_init(LiveCaptionsSettingsClass *klass) {
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, desktop_source_row);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, microphone_source_row);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, refine_switch);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_group);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_switch);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_key_row);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_model_row);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_delay_row);
 
     gtk_widget_class_bind_template_callback (widget_class, report_cb);
     gtk_widget_class_bind_template_callback (widget_class, about_cb);
@@ -215,6 +300,7 @@ static void livecaptions_settings_class_init(LiveCaptionsSettingsClass *klass) {
     gtk_widget_class_bind_template_callback (widget_class, add_model_cb);
     gtk_widget_class_bind_template_callback (widget_class, on_builtin_toggled);
     gtk_widget_class_bind_template_callback (widget_class, download_models_cb);
+    gtk_widget_class_bind_template_callback (widget_class, on_cloud_key_apply);
 }
 
 // The settings window needs to be kept on top if the main window is kept on top,
@@ -589,4 +675,5 @@ static void livecaptions_settings_init(LiveCaptionsSettings *self) {
     init_source_row(self, self->microphone_source_row, "microphone-source", false);
 
     init_models_page(self);
+    init_cloud_group(self);
 }

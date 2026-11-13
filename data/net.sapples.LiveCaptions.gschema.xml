@@ -46,6 +46,21 @@
             <summary>Re-transcribe each finished line with an installed Parakeet model for better accuracy</summary>
         </key>
 
+        <key name="cloud-enabled" type="b">
+            <default>false</default>
+            <summary>Transcribe with OpenAI's Realtime API instead of the local model</summary>
+        </key>
+
+        <key name="cloud-model" type="s">
+            <default>'gpt-realtime-whisper'</default>
+            <summary>OpenAI transcription model</summary>
+        </key>
+
+        <key name="cloud-delay" type="s">
+            <default>'low'</default>
+            <summary>OpenAI latency setting: minimal, low, medium, high or xhigh</summary>
+        </key>
+
         <key name="transparent-window" type="b">
             <default>false</default>
             <summary>Make window transparent</summary>

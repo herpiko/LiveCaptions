@@ -37,6 +37,23 @@ if sherpa_onnx_dir != ''
   )
 endif
 
+openai_deps = [
+  dependency('libsoup-3.0', required: get_option('openai')),
+  dependency('json-glib-1.0', required: get_option('openai')),
+  dependency('libsecret-1', required: get_option('openai')),
+]
+openai_found = true
+foreach d : openai_deps
+  if not d.found()
+    openai_found = false
+  endif
+endforeach
+if openai_found
+  livecaptions_sources += ['cloudasr.c', 'secret-store.c']
+  livecaptions_deps += openai_deps
+  livecaptions_deps += declare_dependency(compile_args: ['-DLIVE_CAPTIONS_CLOUD'])
+endif
+
 gnome = import('gnome')
 
 livecaptions_sources += gnome.compile_resources('livecaptions-resources',

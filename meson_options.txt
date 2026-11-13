@@ -9,3 +9,9 @@ option('sherpa_onnx_dir',
   value: '',
   description: 'Path to a sherpa-onnx C API release (with include/ and lib/) to enable the sherpa-onnx speech recognition backend'
 )
+
+option('openai',
+  type: 'feature',
+  value: 'auto',
+  description: 'OpenAI Realtime API cloud transcription (needs libsoup-3.0, json-glib-1.0 and libsecret-1)'
+)

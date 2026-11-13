@@ -58,6 +58,12 @@ struct _LiveCaptionsSettings {
     AdwComboRow *microphone_source_row;
 
     AdwSwitchRow *refine_switch;
+
+    AdwPreferencesGroup *cloud_group;
+    AdwSwitchRow *cloud_switch;
+    AdwEntryRow *cloud_key_row;
+    AdwComboRow *cloud_model_row;
+    AdwComboRow *cloud_delay_row;
 };
 
 G_BEGIN_DECLS
