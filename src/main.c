@@ -44,6 +44,16 @@ int main (int argc, char *argv[]) {
 #endif
 
     GSettings *settings = g_settings_new("net.sapples.LiveCaptions");
+
+    // Wayland doesn't let apps keep their own window on top, but X11 does,
+    // and GNOME/KDE honour it for XWayland windows. So when keep-on-top is
+    // on, run through XWayland (unless GDK_BACKEND says otherwise).
+    if(g_settings_get_boolean(settings, "keep-on-top") &&
+       g_getenv("GDK_BACKEND") == NULL &&
+       g_strcmp0(g_getenv("XDG_SESSION_TYPE"), "wayland") == 0 &&
+       g_getenv("DISPLAY") != NULL) {
+        gdk_set_allowed_backends("x11,*");
+    }
     char *active_model = g_settings_get_string(settings, "active-model");
     if(active_model == NULL) active_model = GET_MODEL_PATH();
 

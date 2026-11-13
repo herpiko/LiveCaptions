@@ -717,6 +717,14 @@ static void livecaptions_settings_init(LiveCaptionsSettings *self) {
         g_idle_add(deferred_update_keep_above, self);
 
         gtk_label_set_label(self->keep_above_instructions, "");
+    } else if(g_strcmp0(g_getenv("XDG_SESSION_TYPE"), "wayland") == 0 && g_getenv("DISPLAY") != NULL &&
+              g_getenv("GDK_BACKEND") == NULL) {
+        // Running on Wayland because keep-on-top was off at startup; turning
+        // it on switches to XWayland, where it works, on the next start
+        g_settings_bind(self->settings, "keep-on-top", self->keep_above_switch, "active", G_SETTINGS_BIND_DEFAULT);
+        gtk_widget_set_sensitive(GTK_WIDGET(self->keep_above_switch), true);
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(self->keep_above_switch), _("Takes effect after restarting Live Captions"));
+        gtk_label_set_label(self->keep_above_instructions, "");
     } else {
         adw_action_row_set_subtitle(ADW_ACTION_ROW(self->keep_above_switch), _("Your compositor does not support this setting. Read below for manual instructions"));
         gtk_widget_set_sensitive(GTK_WIDGET(self->keep_above_switch), false);
