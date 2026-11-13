@@ -279,8 +279,19 @@ static void on_model_deleted(GtkButton *button, LiveCaptionsSettings *self) {
     adw_preferences_group_remove(self->models_list, GTK_WIDGET(row));
 }
 
-static void insert_model_to_list(LiveCaptionsSettings *self, gchar *model) {
+// deletable: false for models installed with the app, which are always listed
+static void insert_model_to_list_full(LiveCaptionsSettings *self, const gchar *model, bool deletable) {
     if(IS_BUILTIN_MODEL(model)) return;
+    if(!asr_model_supported(model)) return;
+
+    // Each model is listed once, even if it's both installed and user-added
+    GHashTable *listed = g_object_get_data(G_OBJECT(self->models_list), "lcap-listed-models");
+    if(listed == NULL) {
+        listed = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+        g_object_set_data_full(G_OBJECT(self->models_list), "lcap-listed-models", listed, (GDestroyNotify)g_hash_table_unref);
+    }
+    if(g_hash_table_contains(listed, model)) return;
+    g_hash_table_add(listed, g_strdup(model));
 
     GtkCheckButton *first = self->radio_button_1;
     AdwActionRow *row = g_object_new(ADW_TYPE_ACTION_ROW, NULL);
@@ -288,16 +299,24 @@ static void insert_model_to_list(LiveCaptionsSettings *self, gchar *model) {
     GtkCheckButton *button = g_object_new(GTK_TYPE_CHECK_BUTTON, NULL);
     gtk_widget_set_valign(GTK_WIDGET(button), GTK_ALIGN_CENTER);
 
-    GtkWidget *delete_button = gtk_button_new_from_icon_name("delete-symbolic");
-    gtk_widget_add_css_class(delete_button, "flat");
-    gtk_widget_set_valign(delete_button, GTK_ALIGN_CENTER);
+    GtkWidget *delete_button = NULL;
+    if(deletable) {
+        delete_button = gtk_button_new_from_icon_name("delete-symbolic");
+        gtk_widget_add_css_class(delete_button, "flat");
+        gtk_widget_set_valign(delete_button, GTK_ALIGN_CENTER);
+    }
 
-    gchar *name = g_utf8_strrchr(model, -1, (gunichar)('/')) + 1;
+    g_autofree char *name = asr_model_display_name(model);
 
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), name);
+    g_autofree char *subtitle = g_strdup_printf("%s%s",
+        asr_is_sherpa_model(model) ? "sherpa-onnx" : "April",
+        deletable ? "" : _(", installed with Live Captions"));
+    adw_action_row_set_subtitle(row, subtitle);
     adw_preferences_group_add(self->models_list, GTK_WIDGET(row));
     adw_action_row_add_prefix(row, GTK_WIDGET(button));
-    adw_action_row_add_suffix(row, delete_button);
+    if(delete_button != NULL)
+        adw_action_row_add_suffix(row, delete_button);
 
     adw_action_row_set_activatable_widget(row, GTK_WIDGET(button));
 
@@ -315,11 +334,57 @@ static void insert_model_to_list(LiveCaptionsSettings *self, gchar *model) {
     g_object_set_data(G_OBJECT(button), "lcap-model-path", quark);
     g_signal_connect(button, "toggled", G_CALLBACK(on_model_selected), self);
 
-    g_object_set_data(G_OBJECT(delete_button), "lcap-model-path", quark);
-    g_signal_connect(delete_button, "clicked", G_CALLBACK(on_model_deleted), self);
+    if(delete_button != NULL) {
+        g_object_set_data(G_OBJECT(delete_button), "lcap-model-path", quark);
+        g_signal_connect(delete_button, "clicked", G_CALLBACK(on_model_deleted), self);
+    }
+}
+
+static void insert_model_to_list(LiveCaptionsSettings *self, gchar *model) {
+    insert_model_to_list_full(self, model, true);
+}
+
+// Lists the models installed alongside the app (.april files and sherpa-onnx
+// model directories in SYSTEM_MODELS_DIR)
+static void insert_system_models(LiveCaptionsSettings *self) {
+    GDir *dir = g_dir_open(SYSTEM_MODELS_DIR, 0, NULL);
+    if(dir == NULL) return;
+
+    GPtrArray *paths = g_ptr_array_new_with_free_func(g_free);
+    const char *name;
+    while((name = g_dir_read_name(dir)) != NULL) {
+        char *path = g_build_filename(SYSTEM_MODELS_DIR, name, NULL);
+        if(g_str_has_suffix(name, ".april")) {
+            g_ptr_array_add(paths, path);
+        } else if(g_file_test(path, G_FILE_TEST_IS_DIR)) {
+            g_ptr_array_add(paths, g_build_filename(path, "tokens.txt", NULL));
+            g_free(path);
+        } else {
+            g_free(path);
+        }
+    }
+    g_dir_close(dir);
+
+    g_ptr_array_sort_values(paths, (GCompareFunc)g_strcmp0);
+    for(guint i = 0; i < paths->len; i++) {
+        const char *p = g_ptr_array_index(paths, i);
+        if(g_file_test(p, G_FILE_TEST_EXISTS)) insert_model_to_list_full(self, p, false);
+    }
+    g_ptr_array_unref(paths);
 }
 
 static void init_models_page(LiveCaptionsSettings *self) {
+    // Say which model "Built-in Model" is
+    GtkWidget *builtin_row = gtk_widget_get_ancestor(GTK_WIDGET(self->radio_button_1), ADW_TYPE_ACTION_ROW);
+    if(builtin_row != NULL) {
+        g_autofree char *name = asr_model_display_name(DEFAULT_MODEL_PATH);
+        g_autofree char *subtitle = g_strdup_printf("%s (%s)", name,
+            asr_is_sherpa_model(DEFAULT_MODEL_PATH) ? "sherpa-onnx" : "April");
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(builtin_row), subtitle);
+    }
+
+    insert_system_models(self);
+
     gchar **models = g_settings_get_strv(self->settings, "installed-models");
 
     for(int i=0; models[i] != NULL; i++){

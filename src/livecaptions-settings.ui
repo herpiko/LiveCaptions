@@ -50,6 +50,7 @@
             <child>
               <object class="AdwComboRow" id="microphone_source_row">
                 <property name="title" translatable="yes">Microphone</property>
+                <property name="subtitle" translatable="yes">Mixed with desktop audio when the microphone button is on</property>
               </object>
             </child>
 
@@ -329,9 +330,10 @@
   </template>
 
   <object class="GtkFileFilter" id="file_filter">
-    <property name="name" translatable="yes">April Models</property>
+    <property name="name" translatable="yes">Models (.april, or tokens.txt of a sherpa-onnx model)</property>
     <patterns>
       <pattern>*.april</pattern>
+      <pattern>tokens.txt</pattern>
     </patterns>
   </object>
 

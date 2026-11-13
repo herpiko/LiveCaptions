@@ -34,24 +34,6 @@ uint64_t get_time_us(void) {
 }
 
 
-static void benchmark_dummy_handler(G_GNUC_UNUSED void* _userdata,
-                                    G_GNUC_UNUSED AprilResultType _result,
-                                    G_GNUC_UNUSED size_t _count,
-                                    G_GNUC_UNUSED const AprilToken* _tokens)
-{
-    // do nothing with result, we don't need it
-}
-
-
-static gboolean update_progress(gpointer userdata){
-    LiveCaptionsWelcome *self = userdata;
-
-    gtk_progress_bar_set_fraction(self->benchmark_progress, self->benchmark_progress_v);
-
-    return G_SOURCE_REMOVE;
-}
-
-
 static gboolean benchmark_finish(gpointer userdata){
     LiveCaptionsWelcome *self = userdata;
 
@@ -74,60 +56,22 @@ static gboolean benchmark_finish(gpointer userdata){
     return G_SOURCE_REMOVE;
 }
 
+static gboolean poll_progress(gpointer userdata){
+    LiveCaptionsWelcome *self = userdata;
+
+    gtk_progress_bar_set_fraction(self->benchmark_progress, self->benchmark_progress_v);
+
+    return (self->benchmark_progress_v >= 1.0) ? G_SOURCE_REMOVE : G_SOURCE_CONTINUE;
+}
+
 static void *run_benchmark_thread(void *userdata) {
     LiveCaptionsWelcome *self = userdata;
 
-    AprilASRModel model = asr_thread_get_model(self->application->asr);
-    g_assert(model != NULL);
+    self->benchmark_progress_v = 0.0;
+    g_timeout_add(250, poll_progress, self);
 
-    AprilConfig config = {
-        .handler = benchmark_dummy_handler,
-        .userdata = NULL,
-        .flags = APRIL_CONFIG_FLAG_ZERO_BIT
-    };
-
-    AprilASRSession session = aas_create_session(model, config);
-    g_assert(session != NULL);
-
-    short noise_data[48000];
-    for(int i=0; i<48000; i++){
-        noise_data[i] = rand();
-    }
-
-    size_t sr = aam_get_sample_rate(model);
-    g_assert(sr < 48000);
-
-    uint64_t begin = get_time_us();
-
-
-    int idx = 0;
-    for(int sec=0; sec<30; sec++){
-        aas_feed_pcm16(session, &noise_data[idx], sr);
-
-        idx = (idx + sr) % 48000;
-        self->benchmark_progress_v = ((double)sec) / 30.0;
-
-
-        uint64_t current = get_time_us();
-        double time_diff = (current - begin) / 1000.0 / 1000.0;
-        if(time_diff > 55.0) {
-            double speed = ((double)sec) / time_diff;
-            self->benchmark_result_v = speed;
-            
-            goto end;
-        }
-
-        g_idle_add(update_progress, self);
-    }
-
-    uint64_t end = get_time_us();
-    double time_diff = (end - begin) / 1000.0 / 1000.0;
-
-    double speed = 30.0 / time_diff;
-    self->benchmark_result_v = speed;
-
-end:
-    aas_free(session);
+    self->benchmark_result_v = asr_thread_benchmark(self->application->asr, &self->benchmark_progress_v);
+    self->benchmark_progress_v = 1.0;
 
     g_idle_add(benchmark_finish, self);
 

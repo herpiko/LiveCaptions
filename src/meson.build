@@ -28,6 +28,14 @@ livecaptions_deps = [
   april_lib
 ]
 
+sherpa_onnx_dir = get_option('sherpa_onnx_dir')
+if sherpa_onnx_dir != ''
+  livecaptions_deps += declare_dependency(
+    dependencies: cc.find_library('sherpa-onnx-c-api', dirs: [sherpa_onnx_dir / 'lib']),
+    compile_args: ['-DLIVE_CAPTIONS_SHERPA', '-I' + (sherpa_onnx_dir / 'include')],
+  )
+endif
+
 gnome = import('gnome')
 
 livecaptions_sources += gnome.compile_resources('livecaptions-resources',

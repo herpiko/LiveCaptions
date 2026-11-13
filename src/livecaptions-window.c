@@ -163,10 +163,9 @@ static gboolean show_relevant_slow_warning(void *userdata) {
         gtk_label_set_text(self->label, "");
     }
 
-    AprilASRSession session = (AprilASRSession)asr_thread_get_session(asr);
-    if(session == NULL) return G_SOURCE_CONTINUE;
+    if(!asr_thread_is_loaded(asr)) return G_SOURCE_CONTINUE;
 
-    float speedup = aas_realtime_get_speedup(session);
+    float speedup = asr_thread_get_speedup(asr);
 
     if(speedup <= 1.1) {
         gtk_widget_set_visible(GTK_WIDGET(self->slow_warning), false);

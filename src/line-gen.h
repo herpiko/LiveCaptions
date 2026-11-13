@@ -69,6 +69,9 @@ struct line_generator {
 
     bool is_english;
     struct token_capitalizer tcap;
+
+    // Set when the model outputs properly cased text, so it isn't lowercased
+    bool preserve_case;
 };
 
 void line_generator_init(struct line_generator *lg);

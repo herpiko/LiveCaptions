@@ -38,5 +38,16 @@ gpointer asr_thread_get_session(asr_thread thread);
 void asr_thread_pause(asr_thread thread, bool pause);
 void asr_thread_set_text_stream_active(asr_thread thread, bool active);
 int asr_thread_samplerate(asr_thread thread);
+float asr_thread_get_speedup(asr_thread thread);
+bool asr_thread_is_loaded(asr_thread thread);
+// Runs ~30s of noise through the loaded model; returns realtime speed factor
+double asr_thread_benchmark(asr_thread thread, volatile double *progress);
+
+// True if model_path is a sherpa-onnx model (its directory or tokens.txt)
+bool asr_is_sherpa_model(const char *model_path);
+// False for sherpa-onnx models when this build doesn't include sherpa-onnx
+bool asr_model_supported(const char *model_path);
+// Short name to show for a model path (caller frees)
+char *asr_model_display_name(const char *model_path);
 void asr_thread_flush(asr_thread thread);
 void free_asr_thread(asr_thread thread);

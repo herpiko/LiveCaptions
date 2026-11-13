@@ -107,6 +107,7 @@ void line_generator_init(struct line_generator *lg) {
 
     lg->current_line = 0;
     lg->active_start_of_lines[0] = 0;
+    lg->preserve_case = false;
 
     if(settings == NULL) settings = g_settings_new("net.sapples.LiveCaptions");
 
@@ -197,11 +198,12 @@ void line_generator_update(struct line_generator *lg, size_t num_tokens, const A
                         break;
                     }
 
-                    c = g_unichar_tolower(c);
+                    if(!lg->preserve_case) c = g_unichar_tolower(c);
 
                     if(should_be_capitalized){
                         gunichar c1 = g_unichar_toupper(c);
-                        if(c != c1){
+                        // An already-uppercase letter (cased models) also satisfies it
+                        if((c != c1) || g_unichar_isupper(c)){
                             c = c1;
                             should_be_capitalized = false;
                         }
