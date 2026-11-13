@@ -25,3 +25,8 @@ bool is_keep_above_supported(GtkWindow *window);
 
 // Returns false if impossible to set keep above
 bool set_window_keep_above(GtkWindow *window, bool keep_above);
+
+// Moves a shown window to the horizontal centre of its monitor's work area,
+// bottom_margin pixels above the bottom. Only possible on X11 (incl.
+// XWayland); returns false elsewhere.
+bool move_window_to_bottom_center(GtkWindow *window, int bottom_margin);

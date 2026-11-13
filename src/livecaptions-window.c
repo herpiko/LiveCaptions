@@ -146,6 +146,22 @@ static void on_settings_change(G_GNUC_UNUSED GSettings *settings,
 }
 
 
+#define WINDOW_BOTTOM_MARGIN 50
+
+// Start out centred near the bottom of the screen, like subtitles
+static gboolean place_window(gpointer userdata) {
+    LiveCaptionsWindow *self = userdata;
+    move_window_to_bottom_center(GTK_WINDOW(self), WINDOW_BOTTOM_MARGIN);
+    return G_SOURCE_REMOVE;
+}
+
+static void on_first_map(GtkWidget *widget, gpointer userdata) {
+    LiveCaptionsWindow *self = userdata;
+    g_signal_handlers_disconnect_by_func(widget, on_first_map, userdata);
+    // Wait for the first layout so the window's size is known
+    g_timeout_add(150, place_window, self);
+}
+
 static gboolean deferred_update_keep_above(void *userdata) {
     LiveCaptionsWindow *self = userdata;
 
@@ -305,6 +321,7 @@ static void livecaptions_window_init(LiveCaptionsWindow *self) {
     self->was_errored = false;
 
     g_idle_add(deferred_update_keep_above, self);
+    g_signal_connect(self, "map", G_CALLBACK(on_first_map), self);
     g_timeout_add_seconds(5, show_relevant_slow_warning, self);
 
     // GTK adds solid-csd class when the compositor does not support window shadows
