@@ -42,6 +42,10 @@ struct audio_thread_pa_i {
     char *sink_name;
     char *source_name;
 
+    // User-selected source, or NULL to use the default
+    char *requested_source;
+    int requested_lookup; // 0 = pending, 1 = found, -1 = not found
+
     pa_threaded_mainloop *mainloop;
     pa_mainloop_api *mainloop_api;
     pa_context *context;
@@ -53,6 +57,18 @@ static void context_state_cb(pa_context* context, void* userdata);
 static void stream_state_cb(pa_stream *s, void *userdata);
 static void stream_success_cb(pa_stream *stream, int success, void *userdata);
 static void stream_read_cb(pa_stream *stream, size_t nbytes, void *userdata);
+
+static void requested_source_info_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata) {
+    audio_thread_pa data = (audio_thread_pa)userdata;
+
+    if(eol == 0 && i != NULL) {
+        data->requested_lookup = 1;
+        return;
+    }
+
+    if(data->requested_lookup == 0) data->requested_lookup = -1;
+    pa_threaded_mainloop_signal(data->mainloop, 0);
+}
 
 static void server_info_callback(pa_context *c, const pa_server_info *i, void *userdata){
     audio_thread_pa data = (audio_thread_pa)userdata;
@@ -131,6 +147,25 @@ void *run_audio_thread_pa(void *userdata) {
         PA_STREAM_ADJUST_LATENCY;
 
     const char *dev_name = data->microphone ? NULL : data->sink_name;
+
+    // Use the user-selected source if it currently exists, otherwise fall back
+    // to the default so an unplugged device doesn't break captioning.
+    if(data->requested_source != NULL) {
+        data->requested_lookup = 0;
+        pa_operation *op = pa_context_get_source_info_by_name(data->context,
+            data->requested_source, requested_source_info_cb, data);
+        if(op != NULL) {
+            while(pa_operation_get_state(op) == PA_OPERATION_RUNNING)
+                pa_threaded_mainloop_wait(data->mainloop);
+            pa_operation_unref(op);
+        }
+
+        if(data->requested_lookup == 1) {
+            dev_name = data->requested_source;
+        } else {
+            printf("Audio source %s not found, using default\n", data->requested_source);
+        }
+    }
     assert(pa_stream_connect_record(data->stream, dev_name, &buffer_attr, stream_flags) == 0);
 
     // Wait for the stream to be ready
@@ -201,10 +236,12 @@ static void stream_success_cb(pa_stream *stream, int success, void *userdata) {
 }
 
 
-audio_thread_pa create_audio_thread_pa(bool microphone, asr_thread asr) {
+audio_thread_pa create_audio_thread_pa(bool microphone, const char *source_name, asr_thread asr) {
     audio_thread_pa data = calloc(1, sizeof(struct audio_thread_pa_i));
 
     data->microphone = microphone;
+    if(source_name != NULL && source_name[0] != '\0')
+        data->requested_source = g_strdup(source_name);
     data->asr = asr;
     data->sample_rate = asr_thread_samplerate(asr);
 
@@ -236,4 +273,73 @@ void free_audio_thread_pa(audio_thread_pa thread){
 
     free(thread->sink_name);
     free(thread->source_name);
+    g_free(thread->requested_source);
+}
+
+
+void audio_source_info_free(gpointer info) {
+    audio_source_info *s = info;
+    g_free(s->name);
+    g_free(s->description);
+    g_free(s);
+}
+
+struct source_list_ctx {
+    GPtrArray *sources;
+    bool monitors;
+    bool done;
+};
+
+static void source_list_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata) {
+    struct source_list_ctx *ctx = userdata;
+
+    if(eol != 0 || i == NULL) {
+        ctx->done = true;
+        return;
+    }
+
+    bool is_monitor = i->monitor_of_sink != PA_INVALID_INDEX;
+    if(is_monitor != ctx->monitors) return;
+
+    audio_source_info *s = g_new0(audio_source_info, 1);
+    s->name = g_strdup(i->name);
+    s->description = g_strdup((i->description != NULL && i->description[0] != '\0') ? i->description : i->name);
+    g_ptr_array_add(ctx->sources, s);
+}
+
+GPtrArray *audiocap_list_sources(bool monitors) {
+    GPtrArray *sources = g_ptr_array_new_with_free_func(audio_source_info_free);
+
+    pa_mainloop *mainloop = pa_mainloop_new();
+    if(mainloop == NULL) return sources;
+
+    pa_context *context = pa_context_new(pa_mainloop_get_api(mainloop), "lcap-list-sources");
+    if(context == NULL) goto free_mainloop;
+
+    if(pa_context_connect(context, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL) < 0) goto free_context;
+
+    for(;;) {
+        pa_context_state_t state = pa_context_get_state(context);
+        if(state == PA_CONTEXT_READY) break;
+        if(!PA_CONTEXT_IS_GOOD(state)) goto disconnect;
+        if(pa_mainloop_iterate(mainloop, 1, NULL) < 0) goto disconnect;
+    }
+
+    struct source_list_ctx ctx = { sources, monitors, false };
+    pa_operation *op = pa_context_get_source_info_list(context, source_list_cb, &ctx);
+    if(op != NULL) {
+        while(!ctx.done && pa_operation_get_state(op) == PA_OPERATION_RUNNING) {
+            if(pa_mainloop_iterate(mainloop, 1, NULL) < 0) break;
+        }
+        pa_operation_unref(op);
+    }
+
+disconnect:
+    pa_context_disconnect(context);
+free_context:
+    pa_context_unref(context);
+free_mainloop:
+    pa_mainloop_free(mainloop);
+
+    return sources;
 }

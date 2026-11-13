@@ -47,13 +47,13 @@ static void *run_audio_thread(void *userdata) {
     return NULL;
 }
 
-audio_thread create_audio_thread(bool microphone, asr_thread asr){
+audio_thread create_audio_thread(bool microphone, const char *source_name, asr_thread asr){
     audio_thread data = calloc(1, sizeof(struct audio_thread_i));
     
     data->using_pulse = USE_PULSEAUDIO;
 
     if(data->using_pulse) {
-        data->thread.pulse = create_audio_thread_pa(microphone, asr);
+        data->thread.pulse = create_audio_thread_pa(microphone, source_name, asr);
         run_audio_thread_pa(data->thread.pulse);
     }
 #ifdef LIVE_CAPTIONS_PIPEWIRE

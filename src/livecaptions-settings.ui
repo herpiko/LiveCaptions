@@ -38,6 +38,26 @@
         
         <child>
           <object class="AdwPreferencesGroup">
+            <property name="title" translatable="yes">Audio Source</property>
+            <property name="description" translatable="yes">Choose which device to caption. Desktop audio listens to what an output device is playing.</property>
+
+            <child>
+              <object class="AdwComboRow" id="desktop_source_row">
+                <property name="title" translatable="yes">Desktop Audio</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="AdwComboRow" id="microphone_source_row">
+                <property name="title" translatable="yes">Microphone</property>
+              </object>
+            </child>
+
+          </object>
+        </child>
+
+        <child>
+          <object class="AdwPreferencesGroup">
             <property name="description" translatable="yes"></property>
             <property name="title" translatable="yes">Text Settings</property>
 

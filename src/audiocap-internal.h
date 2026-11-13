@@ -35,7 +35,7 @@
 struct audio_thread_pa_i;
 typedef struct audio_thread_pa_i * audio_thread_pa;
 
-audio_thread_pa create_audio_thread_pa(bool microphone, asr_thread asr);
+audio_thread_pa create_audio_thread_pa(bool microphone, const char *source_name, asr_thread asr);
 void *run_audio_thread_pa(void *thread);
 void free_audio_thread_pa(audio_thread_pa thread);
 

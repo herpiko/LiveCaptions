@@ -38,7 +38,9 @@ static void init_audio(LiveCaptionsApplication *self) {
     deinit_audio(self);
 
     gboolean use_microphone = g_settings_get_boolean(self->settings, "microphone");
-    self->audio = create_audio_thread(use_microphone, self->asr);
+    g_autofree char *source = g_settings_get_string(self->settings,
+        use_microphone ? "microphone-source" : "desktop-source");
+    self->audio = create_audio_thread(use_microphone, source, self->asr);
 
     asr_thread_flush(self->asr);
 }
@@ -261,6 +263,9 @@ static void on_settings_change(G_GNUC_UNUSED GSettings *settings,
     if(g_str_equal(key, "microphone")) {
         init_audio(self);
         g_simple_action_set_state(self->mic_action, g_variant_new_boolean(g_settings_get_boolean(self->settings, "microphone")));
+    }else if(g_str_equal(key, "desktop-source") || g_str_equal(key, "microphone-source")) {
+        gboolean use_microphone = g_settings_get_boolean(self->settings, "microphone");
+        if(use_microphone == g_str_equal(key, "microphone-source")) init_audio(self);
     }else if(g_str_equal(key, "filter-slurs")) {
         if(g_settings_get_boolean(self->settings, "filter-profanity") && !g_settings_get_boolean(self->settings, "filter-slurs")){
             // Filter slurs was turned off but profanity is still on, this is invalid state, turn off filter profanity

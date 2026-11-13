@@ -26,6 +26,7 @@
 #include "history.h"
 #include "livecaptions-history-window.h"
 #include "asrproc.h"
+#include "audiocap.h"
 
 G_DEFINE_TYPE(LiveCaptionsSettings, livecaptions_settings, ADW_TYPE_PREFERENCES_WINDOW)
 
@@ -202,6 +203,9 @@ static void livecaptions_settings_class_init(LiveCaptionsSettingsClass *klass) {
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, models_list);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, radio_button_1);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, file_filter);
+
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, desktop_source_row);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, microphone_source_row);
 
     gtk_widget_class_bind_template_callback (widget_class, report_cb);
     gtk_widget_class_bind_template_callback (widget_class, about_cb);
@@ -401,6 +405,63 @@ static void on_add_model_response(GtkNativeDialog *native,
     g_object_unref(native);
 }
 
+// Each source combo row keeps a GPtrArray of PulseAudio source names, parallel
+// to its string list. Index 0 is "System Default" (empty name).
+#define SOURCE_NAMES_KEY "lcap-source-names"
+#define SOURCE_SETTING_KEY "lcap-source-setting"
+
+static void on_source_selected(AdwComboRow *row, G_GNUC_UNUSED GParamSpec *pspec, LiveCaptionsSettings *self) {
+    GPtrArray *names = g_object_get_data(G_OBJECT(row), SOURCE_NAMES_KEY);
+    const char *key = g_object_get_data(G_OBJECT(row), SOURCE_SETTING_KEY);
+    guint idx = adw_combo_row_get_selected(row);
+    if(names == NULL || key == NULL || idx >= names->len) return;
+
+    const char *name = g_ptr_array_index(names, idx);
+    g_autofree char *current = g_settings_get_string(self->settings, key);
+    if(!g_str_equal(current, name)) g_settings_set_string(self->settings, key, name);
+}
+
+static void init_source_row(LiveCaptionsSettings *self, AdwComboRow *row, const char *key, bool monitors) {
+    const char *default_label = monitors
+        ? _("System Default (default output)")
+        : _("System Default (default input)");
+
+    GtkStringList *labels = gtk_string_list_new(NULL);
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+
+    gtk_string_list_append(labels, default_label);
+    g_ptr_array_add(names, g_strdup(""));
+
+    g_autofree char *current = g_settings_get_string(self->settings, key);
+    guint selected = 0;
+
+    g_autoptr(GPtrArray) sources = audiocap_list_sources(monitors);
+    for(guint i = 0; i < sources->len; i++) {
+        audio_source_info *src = g_ptr_array_index(sources, i);
+        if(g_str_equal(src->name, current)) selected = names->len;
+        gtk_string_list_append(labels, src->description);
+        g_ptr_array_add(names, g_strdup(src->name));
+    }
+
+    // Keep a saved device that is currently unplugged selectable, so opening
+    // preferences doesn't silently reset the choice.
+    if(selected == 0 && current[0] != '\0') {
+        g_autofree char *label = g_strdup_printf(_("%s (unavailable)"), current);
+        selected = names->len;
+        gtk_string_list_append(labels, label);
+        g_ptr_array_add(names, g_strdup(current));
+    }
+
+    g_object_set_data_full(G_OBJECT(row), SOURCE_NAMES_KEY, names, (GDestroyNotify)g_ptr_array_unref);
+    g_object_set_data(G_OBJECT(row), SOURCE_SETTING_KEY, (gpointer)key);
+
+    adw_combo_row_set_model(row, G_LIST_MODEL(labels));
+    g_object_unref(labels);
+    adw_combo_row_set_selected(row, selected);
+
+    g_signal_connect(row, "notify::selected", G_CALLBACK(on_source_selected), self);
+}
+
 static void livecaptions_settings_init(LiveCaptionsSettings *self) {
     gtk_widget_init_template(GTK_WIDGET(self));
 
@@ -442,6 +503,9 @@ static void livecaptions_settings_init(LiveCaptionsSettings *self) {
         const char *always_on_top_text = get_always_on_top_tip_text();
         gtk_label_set_label(self->keep_above_instructions, always_on_top_text);
     }
+
+    init_source_row(self, self->desktop_source_row, "desktop-source", true);
+    init_source_row(self, self->microphone_source_row, "microphone-source", false);
 
     init_models_page(self);
 }

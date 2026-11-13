@@ -53,6 +53,9 @@ struct _LiveCaptionsSettings {
     GtkCheckButton *radio_button_1;
 
     GtkFileFilter *file_filter;
+
+    AdwComboRow *desktop_source_row;
+    AdwComboRow *microphone_source_row;
 };
 
 G_BEGIN_DECLS

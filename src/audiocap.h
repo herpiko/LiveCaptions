@@ -20,10 +20,25 @@
 
 #pragma once
 
+#include <glib.h>
 #include "asrproc.h"
 
 struct audio_thread_i;
 typedef struct audio_thread_i * audio_thread;
 
-audio_thread create_audio_thread(bool microphone, asr_thread asr);
+// source_name: PulseAudio source to record from. NULL or "" uses the default
+// (the default output's monitor for desktop audio, the default input for microphone).
+audio_thread create_audio_thread(bool microphone, const char *source_name, asr_thread asr);
 void free_audio_thread(audio_thread thread);
+
+typedef struct {
+    char *name;
+    char *description;
+} audio_source_info;
+
+void audio_source_info_free(gpointer info);
+
+// Lists PulseAudio sources. With monitors=true returns only sink monitors
+// (desktop audio), otherwise only real inputs (microphones).
+// Returns a GPtrArray of audio_source_info*, which frees its elements.
+GPtrArray *audiocap_list_sources(bool monitors);

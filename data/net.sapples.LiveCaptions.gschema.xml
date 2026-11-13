@@ -31,6 +31,16 @@
             <summary>Caption microphone input instead of desktop audio</summary>
         </key>
 
+        <key name="desktop-source" type="s">
+            <default>''</default>
+            <summary>PulseAudio source used for desktop audio (empty uses the default output's monitor)</summary>
+        </key>
+
+        <key name="microphone-source" type="s">
+            <default>''</default>
+            <summary>PulseAudio source used for microphone input (empty uses the default input)</summary>
+        </key>
+
         <key name="transparent-window" type="b">
             <default>false</default>
             <summary>Make window transparent</summary>
