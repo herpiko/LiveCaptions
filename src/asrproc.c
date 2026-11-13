@@ -100,6 +100,7 @@ struct asr_thread_i {
     volatile bool cloud_active;
     bool cloud_committed;
     size_t cloud_turn_samples;
+    volatile gint64 cloud_last_text_time; // monotonic usec of the last text from OpenAI
 #endif
 
     LiveCaptionsWindow *window;
@@ -1171,6 +1172,8 @@ static void cloud_result_handler(void *userdata, cloud_result_type type, const c
     // Cloud transcripts are properly cased and punctuated
     data->line.preserve_case = true;
 
+    if(texts->len > 0) data->cloud_last_text_time = g_get_monotonic_time();
+
     if(type == CLOUD_RESULT_FINAL) {
         if(texts->len > 0) april_result_handler(data, APRIL_RESULT_RECOGNITION_FINAL, texts->len, tokens);
         april_result_handler(data, APRIL_RESULT_SILENCE, 0, NULL);
@@ -1194,6 +1197,7 @@ void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *mo
         // Finish whatever the previous engine was in the middle of
         if(!active) cloud_asr_commit(thread->cloud);
         thread->cloud_active = active;
+        thread->cloud_last_text_time = g_get_monotonic_time();
         thread->cloud_committed = false;
         thread->cloud_turn_samples = 0;
         thread->silence_counter = 0;
@@ -1210,6 +1214,24 @@ void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *mo
     }
 #else
     (void)thread; (void)api_key; (void)model; (void)delay; (void)languages;
+#endif
+}
+
+double asr_thread_cloud_idle_seconds(asr_thread thread) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    if(thread->cloud_active)
+        return (g_get_monotonic_time() - thread->cloud_last_text_time) / (double)G_USEC_PER_SEC;
+#else
+    (void)thread;
+#endif
+    return -1.0;
+}
+
+void asr_thread_reset_cloud_idle(asr_thread thread) {
+#ifdef LIVE_CAPTIONS_CLOUD
+    thread->cloud_last_text_time = g_get_monotonic_time();
+#else
+    (void)thread;
 #endif
 }
 

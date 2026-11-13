@@ -57,6 +57,11 @@ void asr_thread_set_refine_model(asr_thread thread, const char *model_path);
 // Use OpenAI's Realtime API instead of the local model; a NULL/empty key goes
 // back to the local model. Does nothing when built without cloud support.
 void asr_thread_set_cloud(asr_thread thread, const char *api_key, const char *model, const char *delay, const char *languages);
+// Seconds since OpenAI last returned any text (or since it was turned on),
+// or a negative value when OpenAI isn't in use
+double asr_thread_cloud_idle_seconds(asr_thread thread);
+// Restart that count, e.g. when listening resumes
+void asr_thread_reset_cloud_idle(asr_thread thread);
 // A message to show instead of captions (e.g. a cloud error), or NULL. Caller frees.
 char *asr_thread_get_status(asr_thread thread);
 // True if this build includes OpenAI cloud transcription

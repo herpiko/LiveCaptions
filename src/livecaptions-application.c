@@ -69,9 +69,26 @@ void livecaptions_application_apply_cloud(LiveCaptionsApplication *self) {
     g_autofree char *delay = g_settings_get_string(self->settings, "cloud-delay");
     g_autofree char *languages = g_settings_get_string(self->settings, "cloud-languages");
     asr_thread_set_cloud(self->asr, key, model, delay, languages);
+    asr_thread_reset_cloud_idle(self->asr);
 #else
     (void)self;
 #endif
+}
+
+// With OpenAI, stop listening (and paying) once nothing has been transcribed
+// for a while; the pause button resumes it
+#define CLOUD_IDLE_PAUSE_SECONDS 30.0
+
+static gboolean check_cloud_idle(gpointer user_data) {
+    LiveCaptionsApplication *self = user_data;
+    if(!self->listening || self->welcome != NULL) return G_SOURCE_CONTINUE;
+
+    double idle = asr_thread_cloud_idle_seconds(self->asr);
+    if(idle >= CLOUD_IDLE_PAUSE_SECONDS) {
+        printf("No text from OpenAI for %.0f s, pausing listening\n", idle);
+        g_action_group_change_action_state(G_ACTION_GROUP(self), "listening", g_variant_new_boolean(FALSE));
+    }
+    return G_SOURCE_CONTINUE;
 }
 
 LiveCaptionsApplication *livecaptions_application_new (gchar *application_id, GApplicationFlags flags) {
@@ -135,6 +152,7 @@ static void livecaptions_application_activate(GApplication *app) {
         self->window = lc_window;
         apply_refine_setting(self);
         livecaptions_application_apply_cloud(self);
+        g_timeout_add_seconds(2, check_cloud_idle, self);
         livecaptions_window_set_listening(lc_window, self->listening);
     }
 
@@ -365,6 +383,7 @@ livecaptions_application_toggle_listening(GSimpleAction *action,
     if(self->window != NULL) livecaptions_window_set_listening(self->window, listening);
 
     if(listening) {
+        asr_thread_reset_cloud_idle(self->asr);
         init_audio(self);
     } else {
         // Finish the current utterance, then close audio capture; the
