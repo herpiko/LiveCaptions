@@ -294,6 +294,25 @@ char *asr_find_refine_model(void) {
     return found;
 }
 
+char *asr_model_short_name(const char *model_path) {
+    g_autofree char *name = asr_model_display_name(model_path);
+    g_autofree char *lower = g_ascii_strdown(name, -1);
+
+    static const struct { const char *needle, *label; } known[] = {
+        { "nemotron", "Nemotron" },
+        { "fast-conformer", "FastConformer" },
+        { "parakeet", "Parakeet" },
+        { "kroko", "Kroko" },
+        { "zipformer", "Zipformer" },
+        { "april", "April" },
+    };
+    for(size_t i = 0; i < G_N_ELEMENTS(known); i++)
+        if(strstr(lower, known[i].needle) != NULL) return g_strdup(known[i].label);
+
+    if(g_str_has_suffix(lower, ".april")) return g_strdup("April");
+    return g_steal_pointer(&name);
+}
+
 char *asr_model_display_name(const char *model_path) {
     g_autofree char *dir = sherpa_model_dir(model_path);
     if(dir != NULL) return g_path_get_basename(dir);

@@ -25,6 +25,8 @@
 #include "window-helper.h"
 #include "history.h"
 #include "spectrum.h"
+#include "asrproc.h"
+#include "common.h"
 
 
 G_DEFINE_TYPE(LiveCaptionsWindow, livecaptions_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -43,6 +45,7 @@ static void livecaptions_window_class_init (LiveCaptionsWindowClass *klass) {
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, mic_button);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, listen_button);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, visualizer);
+    gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, model_label);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, label);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, too_slow_warning);
     gtk_widget_class_bind_template_child(widget_class, LiveCaptionsWindow, slow_warning);
@@ -129,11 +132,48 @@ static void update_keep_above(LiveCaptionsWindow *self) {
     }
 }
 
+// Names the transcription engine in the bottom-right corner
+static void update_model_label(LiveCaptionsWindow *self) {
+    g_autofree char *text = NULL;
+
+    if(asr_cloud_supported() && g_settings_get_boolean(self->settings, "cloud-enabled")) {
+        g_autofree char *model = g_settings_get_string(self->settings, "cloud-model");
+        text = g_strdup_printf("OpenAI · %s", model);
+    } else {
+        g_autofree char *active = g_settings_get_string(self->settings, "active-model");
+        if(active == NULL || active[0] == '\0') {
+            g_free(active);
+            active = g_strdup(GET_MODEL_PATH());
+        }
+        g_autofree char *name = asr_model_short_name(active);
+
+        // The Parakeet second pass only runs behind sherpa-onnx models
+        g_autofree char *refine = NULL;
+        if(g_settings_get_boolean(self->settings, "refine-finished-lines") && asr_is_sherpa_model(active))
+            refine = asr_find_refine_model();
+
+        if(refine != NULL) {
+            g_autofree char *refine_name = asr_model_short_name(refine);
+            text = g_strdup_printf("%s + %s", name, refine_name);
+        } else {
+            text = g_steal_pointer(&name);
+        }
+    }
+
+    gtk_label_set_text(self->model_label, text);
+}
+
 static void on_settings_change(G_GNUC_UNUSED GSettings *settings,
                                char      *key,
                                gpointer   user_data){
 
     LiveCaptionsWindow *self = user_data;
+    if(g_str_equal(key, "active-model") || g_str_equal(key, "cloud-enabled") ||
+       g_str_equal(key, "cloud-model") || g_str_equal(key, "refine-finished-lines")) {
+        update_model_label(self);
+        return;
+    }
+
     if(g_str_equal(key, "font-name")) {
         update_font(self);
     }else if(g_str_equal(key, "line-width")) {
@@ -316,6 +356,7 @@ static void livecaptions_window_init(LiveCaptionsWindow *self) {
 
     update_font(self);
     update_window_transparency(self);
+    update_model_label(self);
 
     self->slow_warning_shown = false;
     self->was_errored = false;

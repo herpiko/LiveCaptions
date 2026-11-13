@@ -34,6 +34,7 @@ struct _LiveCaptionsWindow {
     GtkToggleButton  *mic_button;
     GtkToggleButton  *listen_button;
     GtkDrawingArea   *visualizer;
+    GtkLabel         *model_label;
     GtkLabel         *label;
 
     GtkCssProvider *css_provider;

@@ -85,3 +85,10 @@ button.listen-button:not(:checked) {
 button.listen-button:not(:checked):hover {
     background-color: #e66100;
 }
+
+/* Active model name, bottom-right of the captions window */
+.model-label {
+    color: white;
+    font-size: 8pt;
+    opacity: 0.75;
+}

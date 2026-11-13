@@ -66,6 +66,8 @@ void asr_thread_reset_cloud_idle(asr_thread thread);
 char *asr_thread_get_status(asr_thread thread);
 // True if this build includes OpenAI cloud transcription
 bool asr_cloud_supported(void);
+// Friendly model name for the captions window, e.g. "Nemotron" (caller frees)
+char *asr_model_short_name(const char *model_path);
 // Short name to show for a model path (caller frees)
 char *asr_model_display_name(const char *model_path);
 void asr_thread_flush(asr_thread thread);
