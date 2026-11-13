@@ -41,6 +41,16 @@ This application is built using [aprilasr](https://github.com/abb128/april-asr),
 ## Model credit
 Thanks to Fangjun Kuang for the [pretrained model](https://huggingface.co/csukuangfj/icefall-asr-librispeech-lstm-transducer-stateless2-2022-09-03/tree/main), and thanks to the [icefall](https://github.com/k2-fsa/icefall) contributors for creating the model recipes.
 
+# Installing from source (sherpa-onnx models)
+
+On Linux x86-64, `./install.sh` downloads sherpa-onnx, ONNX Runtime and the speech models (about 1.5 GB, cached in `.deps/`), builds Live Captions and installs it under `/usr/local`. Run it as your normal user; it asks for your password only for the final install step. Set `PREFIX` to install elsewhere.
+
+```sh
+./install.sh
+```
+
+It needs the build dependencies listed below (meson, ninja, cmake, a C compiler, GTK 4 and libadwaita, libpulse; libsoup 3, json-glib and libsecret for OpenAI cloud transcription).
+
 # Building
 You must make sure to do a recursive clone to get dependencies:
 ```
