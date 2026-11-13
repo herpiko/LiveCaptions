@@ -186,8 +186,12 @@ static void update_cloud_key_state(LiveCaptionsSettings *self) {
         saved ? _("API Key (saved in keyring; enter a new one to replace it, or apply empty to remove it)")
               : from_env ? _("API Key (using $OPENAI_API_KEY)") : _("API Key"));
 
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(self->cloud_switch),
-        (saved || from_env) ? "" : _("Enter your OpenAI API key below first"));
+    if(self->cloud_radio != NULL) {
+        GtkWidget *row = gtk_widget_get_ancestor(GTK_WIDGET(self->cloud_radio), ADW_TYPE_ACTION_ROW);
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), (saved || from_env)
+            ? _("Cloud, streams audio to OpenAI")
+            : _("Cloud, streams audio to OpenAI. Needs an API key"));
+    }
 }
 #endif
 
@@ -240,13 +244,38 @@ static void bind_string_combo(LiveCaptionsSettings *self, AdwComboRow *row, cons
     g_signal_connect(row, "notify::selected", G_CALLBACK(on_string_combo_selected), self);
 }
 
+static void on_cloud_toggled(GtkCheckButton *button, LiveCaptionsSettings *self) {
+    if(gtk_check_button_get_active(button)) g_settings_set_boolean(self->settings, "cloud-enabled", true);
+}
+
 static void init_cloud_group(LiveCaptionsSettings *self) {
+    GtkWidget *refine_group = gtk_widget_get_ancestor(GTK_WIDGET(self->refine_switch), ADW_TYPE_PREFERENCES_GROUP);
+
     if(!asr_cloud_supported()) {
         gtk_widget_set_visible(GTK_WIDGET(self->cloud_group), false);
         return;
     }
 
-    g_settings_bind(self->settings, "cloud-enabled", self->cloud_switch, "active", G_SETTINGS_BIND_DEFAULT);
+    // OpenAI is listed with the models; picking it shows its settings below
+    AdwActionRow *row = g_object_new(ADW_TYPE_ACTION_ROW, NULL);
+    self->cloud_radio = GTK_CHECK_BUTTON(gtk_check_button_new());
+    gtk_widget_set_valign(GTK_WIDGET(self->cloud_radio), GTK_ALIGN_CENTER);
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), "OpenAI");
+    adw_action_row_add_prefix(row, GTK_WIDGET(self->cloud_radio));
+    adw_action_row_set_activatable_widget(row, GTK_WIDGET(self->cloud_radio));
+    gtk_check_button_set_group(self->cloud_radio, self->radio_button_1);
+    adw_preferences_group_add(self->models_list, GTK_WIDGET(row));
+
+    if(g_settings_get_boolean(self->settings, "cloud-enabled"))
+        gtk_check_button_set_active(self->cloud_radio, true);
+    g_signal_connect(self->cloud_radio, "toggled", G_CALLBACK(on_cloud_toggled), self);
+
+    // Show the OpenAI settings while it's selected, the local-only ones otherwise
+    g_settings_bind(self->settings, "cloud-enabled", self->cloud_group, "visible", G_SETTINGS_BIND_GET);
+    if(refine_group != NULL)
+        g_settings_bind(self->settings, "cloud-enabled", refine_group, "visible",
+                        G_SETTINGS_BIND_GET | G_SETTINGS_BIND_INVERT_BOOLEAN);
+
     bind_string_combo(self, self->cloud_model_row, "cloud-model");
     bind_string_combo(self, self->cloud_delay_row, "cloud-delay");
 #ifdef LIVE_CAPTIONS_CLOUD
@@ -288,7 +317,6 @@ static void livecaptions_settings_class_init(LiveCaptionsSettingsClass *klass) {
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, microphone_source_row);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, refine_switch);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_group);
-    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_switch);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_key_row);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_model_row);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, cloud_delay_row);
@@ -317,6 +345,8 @@ static void model_load_failsafe(LiveCaptionsSettings *self, bool load_default);
 static void on_model_selected(GtkCheckButton* button, LiveCaptionsSettings *self){
     if(!gtk_check_button_get_active(button)) return;
 
+    g_settings_set_boolean(self->settings, "cloud-enabled", false);
+
     const char *model = g_quark_to_string((GQuark)g_object_get_data(G_OBJECT(button), "lcap-model-path"));
     if(!asr_thread_update_model(self->application->asr, model)) {
         model_load_failsafe(self, false);
@@ -328,6 +358,8 @@ static void on_model_selected(GtkCheckButton* button, LiveCaptionsSettings *self
 
 static void on_builtin_toggled(LiveCaptionsSettings *self) {
     if(!gtk_check_button_get_active(self->radio_button_1)) return;
+
+    g_settings_set_boolean(self->settings, "cloud-enabled", false);
 
     const char *model_path = GET_MODEL_PATH();
     asr_thread_update_model(self->application->asr, model_path);

@@ -60,7 +60,7 @@ struct _LiveCaptionsSettings {
     AdwSwitchRow *refine_switch;
 
     AdwPreferencesGroup *cloud_group;
-    AdwSwitchRow *cloud_switch;
+    GtkCheckButton *cloud_radio;
     AdwEntryRow *cloud_key_row;
     AdwComboRow *cloud_model_row;
     AdwComboRow *cloud_delay_row;
