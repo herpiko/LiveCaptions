@@ -206,6 +206,7 @@ static void livecaptions_settings_class_init(LiveCaptionsSettingsClass *klass) {
 
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, desktop_source_row);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, microphone_source_row);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, refine_switch);
 
     gtk_widget_class_bind_template_callback (widget_class, report_cb);
     gtk_widget_class_bind_template_callback (widget_class, about_cb);
@@ -384,6 +385,21 @@ static void init_models_page(LiveCaptionsSettings *self) {
     }
 
     insert_system_models(self);
+
+    // Second pass with Parakeet, if one is installed
+    g_autofree char *refine_model = asr_find_refine_model();
+    g_settings_bind(self->settings, "refine-finished-lines", self->refine_switch, "active", G_SETTINGS_BIND_DEFAULT);
+    if(refine_model != NULL) {
+        g_autofree char *refine_name = asr_model_display_name(refine_model);
+        g_autofree char *refine_subtitle = g_strdup_printf(
+            "Re-transcribe each sentence with %s when it ends, for better accuracy and punctuation. "
+            "Uses more CPU and memory; only applies to sherpa-onnx models.", refine_name);
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(self->refine_switch), refine_subtitle);
+    } else {
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(self->refine_switch),
+            "Needs a Parakeet model in " SYSTEM_MODELS_DIR);
+        gtk_widget_set_sensitive(GTK_WIDGET(self->refine_switch), FALSE);
+    }
 
     gchar **models = g_settings_get_strv(self->settings, "installed-models");
 

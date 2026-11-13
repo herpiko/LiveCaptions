@@ -48,6 +48,14 @@ static void init_audio(LiveCaptionsApplication *self) {
     asr_thread_flush(self->asr);
 }
 
+// Turns the Parakeet second pass on or off to match the setting
+static void apply_refine_setting(LiveCaptionsApplication *self) {
+    g_autofree char *model = NULL;
+    if(g_settings_get_boolean(self->settings, "refine-finished-lines"))
+        model = asr_find_refine_model();
+    asr_thread_set_refine_model(self->asr, model);
+}
+
 LiveCaptionsApplication *livecaptions_application_new (gchar *application_id, GApplicationFlags flags) {
     return g_object_new(LIVECAPTIONS_TYPE_APPLICATION,
                         "application-id", application_id,
@@ -107,6 +115,7 @@ static void livecaptions_application_activate(GApplication *app) {
         gtk_label_set_text(lc_window->label, " \n ");
 
         self->window = lc_window;
+        apply_refine_setting(self);
         livecaptions_window_set_listening(lc_window, self->listening);
     }
 
@@ -271,6 +280,8 @@ static void on_settings_change(G_GNUC_UNUSED GSettings *settings,
         // Desktop audio is always captured; the microphone only when enabled
         if(g_str_equal(key, "desktop-source") || g_settings_get_boolean(self->settings, "microphone"))
             init_audio(self);
+    }else if(g_str_equal(key, "refine-finished-lines")) {
+        apply_refine_setting(self);
     }else if(g_str_equal(key, "filter-slurs")) {
         if(g_settings_get_boolean(self->settings, "filter-profanity") && !g_settings_get_boolean(self->settings, "filter-slurs")){
             // Filter slurs was turned off but profanity is still on, this is invalid state, turn off filter profanity

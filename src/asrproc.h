@@ -47,6 +47,13 @@ double asr_thread_benchmark(asr_thread thread, volatile double *progress);
 bool asr_is_sherpa_model(const char *model_path);
 // False for sherpa-onnx models when this build doesn't include sherpa-onnx
 bool asr_model_supported(const char *model_path);
+// True for offline models (Parakeet) that can only be used to refine finished lines
+bool asr_is_refine_model(const char *model_path);
+// Finds an installed refine model in the system models directory (caller frees), or NULL
+char *asr_find_refine_model(void);
+// Re-transcribe each finished utterance with an offline model; NULL turns it off.
+// Loads in the background. Only applies when the live model is a sherpa-onnx one.
+void asr_thread_set_refine_model(asr_thread thread, const char *model_path);
 // Short name to show for a model path (caller frees)
 char *asr_model_display_name(const char *model_path);
 void asr_thread_flush(asr_thread thread);

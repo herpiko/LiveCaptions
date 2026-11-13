@@ -79,6 +79,16 @@ struct asr_thread_i {
     volatile bool sherpa_stop;
     volatile bool sherpa_flushed;
     volatile gint sherpa_queued_samples;
+    bool sherpa_cased;
+
+    // Optional second pass: an offline model (Parakeet) re-transcribes each
+    // finished utterance. Swapped under refine_mutex by a loader thread.
+    GMutex refine_mutex;
+    const SherpaOnnxOfflineRecognizer *refine_recognizer;
+    bool refine_cased;
+    volatile gint refine_generation;
+    GArray *utterance_audio; // float samples of the current utterance (worker thread only)
+    bool utterance_overflow;
 #endif
 
     LiveCaptionsWindow *window;
@@ -231,13 +241,45 @@ bool asr_is_sherpa_model(const char *model_path) {
     return dir != NULL;
 }
 
+bool asr_is_refine_model(const char *model_path) {
+    g_autofree char *dir = sherpa_model_dir(model_path);
+    if(dir == NULL) return false;
+    g_autofree char *name = g_path_get_basename(dir);
+    g_autofree char *base = g_ascii_strdown(name, -1);
+    // Offline NeMo Parakeet TDT models; these can't caption live by themselves
+    return strstr(base, "parakeet") != NULL && strstr(base, "streaming") == NULL;
+}
+
 bool asr_model_supported(const char *model_path) {
+    // Offline models are only usable as the refining second pass
+    if(asr_is_refine_model(model_path)) return false;
 #ifdef LIVE_CAPTIONS_SHERPA
-    (void)model_path;
     return true;
 #else
     return !asr_is_sherpa_model(model_path);
 #endif
+}
+
+char *asr_find_refine_model(void) {
+    // LIVECAPTIONS_REFINE_MODEL points at a model outside the system directory
+    const char *override = getenv("LIVECAPTIONS_REFINE_MODEL");
+    if(override != NULL && asr_is_refine_model(override)) return g_strdup(override);
+
+    GDir *d = g_dir_open(SYSTEM_MODELS_DIR, 0, NULL);
+    if(d == NULL) return NULL;
+
+    char *found = NULL;
+    const char *name;
+    while((name = g_dir_read_name(d)) != NULL) {
+        g_autofree char *path = g_build_filename(SYSTEM_MODELS_DIR, name, NULL);
+        // Prefer the highest version when several are installed (names sort by version)
+        if(asr_is_refine_model(path) && (found == NULL || strcmp(path, found) > 0)) {
+            g_free(found);
+            found = g_strdup(path);
+        }
+    }
+    g_dir_close(d);
+    return found;
 }
 
 char *asr_model_display_name(const char *model_path) {
@@ -308,12 +350,13 @@ static bool is_sentence_end(const char *s) {
 
 // Converts a sherpa result into AprilTokens. Word starts are marked with a
 // leading space, as April does; sherpa's BPE marker U+2581 becomes a space.
-static void sherpa_convert_result(const SherpaOnnxOnlineRecognizerResult *r, struct sherpa_tokens *out) {
+static void sherpa_convert_tokens(const char *const *tokens_arr, const float *timestamps,
+                                  int32_t count, struct sherpa_tokens *out) {
     out->count = 0;
     bool pending_boundary = false;
 
-    for(int32_t i = 0; i < r->count && out->count < SHERPA_MAX_TOKENS; i++) {
-        const char *tok = r->tokens_arr[i];
+    for(int32_t i = 0; i < count && out->count < SHERPA_MAX_TOKENS; i++) {
+        const char *tok = tokens_arr[i];
         if(tok == NULL || tok[0] == '\0') continue;
 
         // Skip special tokens such as <unk>, <blk>, <en-US>
@@ -367,24 +410,72 @@ static void sherpa_convert_result(const SherpaOnnxOnlineRecognizerResult *r, str
         t->flags = 0;
         if(boundary || out->count == 0) t->flags |= APRIL_TOKEN_FLAG_WORD_BOUNDARY_BIT;
         if(is_sentence_end(boundary ? dst + 1 : dst)) t->flags |= APRIL_TOKEN_FLAG_SENTENCE_END_BIT;
-        t->time_ms = (r->timestamps != NULL) ? (size_t)(r->timestamps[i] * 1000.0f) : 0;
+        t->time_ms = (timestamps != NULL) ? (size_t)(timestamps[i] * 1000.0f) : 0;
         t->reserved = NULL;
 
         out->count++;
     }
 }
 
+// Re-transcribes the finished utterance with the offline model. Returns false
+// (leaving tok untouched) if there's no refine model or it produced nothing.
+static bool sherpa_refine(asr_thread data, struct sherpa_tokens *tok) {
+    GArray *audio = data->utterance_audio;
+    bool usable = !data->utterance_overflow && audio->len >= SHERPA_SAMPLE_RATE / 4;
+    bool refined = false;
+
+    g_mutex_lock(&data->refine_mutex);
+    if(usable && data->refine_recognizer != NULL) {
+        const SherpaOnnxOfflineStream *s = SherpaOnnxCreateOfflineStream(data->refine_recognizer);
+        SherpaOnnxAcceptWaveformOffline(s, SHERPA_SAMPLE_RATE, (const float *)audio->data, (int32_t)audio->len);
+        SherpaOnnxDecodeOfflineStream(data->refine_recognizer, s);
+
+        const SherpaOnnxOfflineRecognizerResult *r = SherpaOnnxGetOfflineStreamResult(s);
+        if(r != NULL && r->count > 0) {
+            struct sherpa_tokens *refined_tok = g_new0(struct sherpa_tokens, 1);
+            sherpa_convert_tokens(r->tokens_arr, r->timestamps, r->count, refined_tok);
+            if(refined_tok->count > 0) {
+                memcpy(tok, refined_tok, sizeof(*tok));
+                // Token pointers must point into tok, not the temporary copy
+                for(size_t i = 0; i < tok->count; i++) tok->tokens[i].token = tok->text[i];
+                refined = true;
+            }
+            g_free(refined_tok);
+
+            if(getenv("LIVECAPTIONS_SHERPA_DEBUG") != NULL)
+                fprintf(stderr, "refined final: %s\n", r->text);
+        }
+        if(r != NULL) SherpaOnnxDestroyOfflineRecognizerResult(r);
+        SherpaOnnxDestroyOfflineStream(s);
+    }
+    g_mutex_unlock(&data->refine_mutex);
+
+    return refined;
+}
+
+static void sherpa_reset_utterance(asr_thread data) {
+    g_array_set_size(data->utterance_audio, 0);
+    data->utterance_overflow = false;
+}
+
 // Emits the current result. Returns the number of tokens emitted.
 static size_t sherpa_emit(asr_thread data, struct sherpa_tokens *tok, AprilResultType type) {
     const SherpaOnnxOnlineRecognizerResult *r =
         SherpaOnnxGetOnlineStreamResult(data->sherpa_recognizer, data->sherpa_stream);
-    sherpa_convert_result(r, tok);
+    sherpa_convert_tokens(r->tokens_arr, r->timestamps, r->count, tok);
 
     // LIVECAPTIONS_SHERPA_DEBUG=1 prints each finalized utterance as decoded
     if(type == APRIL_RESULT_RECOGNITION_FINAL && getenv("LIVECAPTIONS_SHERPA_DEBUG") != NULL)
         fprintf(stderr, "sherpa final: %s\n", r->text);
 
     SherpaOnnxDestroyOnlineRecognizerResult(r);
+
+    // Replace the live transcript of a finished utterance with the second
+    // pass. Only when the live model heard speech, so noise stays silent.
+    if(type == APRIL_RESULT_RECOGNITION_FINAL) {
+        if(tok->count > 0) sherpa_refine(data, tok);
+        sherpa_reset_utterance(data);
+    }
 
     // An empty final would be saved to history as a silence marker; skip it
     if(tok->count > 0)
@@ -426,6 +517,14 @@ static void *run_sherpa_thread(void *userdata) {
         }
 
         g_atomic_int_add(&data->sherpa_queued_samples, -chunk->count);
+
+        // Keep the utterance's audio for the second pass (bounded; the
+        // endpoint rules cut utterances at 20 s)
+        if(data->utterance_audio->len + chunk->count <= 30 * SHERPA_SAMPLE_RATE)
+            g_array_append_vals(data->utterance_audio, chunk->samples, chunk->count);
+        else
+            data->utterance_overflow = true;
+
         SherpaOnnxOnlineStreamAcceptWaveform(data->sherpa_stream, SHERPA_SAMPLE_RATE, chunk->samples, chunk->count);
         g_free(chunk);
 
@@ -531,7 +630,10 @@ static bool sherpa_load_model(asr_thread data, const char *dir) {
     data->sherpa_stream = sherpa_new_stream(recognizer);
 
     g_autofree char *tokens = g_build_filename(dir, "tokens.txt", NULL);
-    data->line.preserve_case = sherpa_tokens_are_cased(tokens);
+    data->sherpa_cased = sherpa_tokens_are_cased(tokens);
+    g_mutex_lock(&data->refine_mutex);
+    data->line.preserve_case = data->sherpa_cased || (data->refine_recognizer != NULL && data->refine_cased);
+    g_mutex_unlock(&data->refine_mutex);
 
     printf("\n-- Model metadata --\n");
     printf("Engine: sherpa-onnx\n");
@@ -543,12 +645,112 @@ static bool sherpa_load_model(asr_thread data, const char *dir) {
 }
 
 static void sherpa_start_worker(asr_thread data) {
+    sherpa_reset_utterance(data);
     data->sherpa_stop = false;
     data->sherpa_flushed = false;
     data->sherpa_thread = g_thread_new("lcap-sherpa", run_sherpa_thread, data);
 }
 
+static const SherpaOnnxOfflineRecognizer *sherpa_create_refine_recognizer(const char *dir) {
+    g_autofree char *tokens  = g_build_filename(dir, "tokens.txt", NULL);
+    g_autofree char *encoder = sherpa_find_onnx(dir, "encoder");
+    g_autofree char *decoder = sherpa_find_onnx(dir, "decoder");
+    g_autofree char *joiner  = sherpa_find_onnx(dir, "joiner");
+
+    if(encoder == NULL || decoder == NULL || joiner == NULL) {
+        printf("sherpa-onnx: %s is missing encoder/decoder/joiner .onnx files\n", dir);
+        return NULL;
+    }
+
+    SherpaOnnxOfflineRecognizerConfig config;
+    memset(&config, 0, sizeof(config));
+
+    config.feat_config.sample_rate = SHERPA_SAMPLE_RATE;
+    config.feat_config.feature_dim = 80;
+
+    config.model_config.transducer.encoder = encoder;
+    config.model_config.transducer.decoder = decoder;
+    config.model_config.transducer.joiner = joiner;
+    config.model_config.tokens = tokens;
+    config.model_config.model_type = "nemo_transducer";
+    config.model_config.provider = "cpu";
+    config.model_config.debug = 0;
+
+    // The second pass runs in short bursts at the end of each utterance, so
+    // give it more threads than the live model to keep corrections quick
+    const char *threads = getenv("LIVECAPTIONS_REFINE_THREADS");
+    config.model_config.num_threads = (threads != NULL) ? atoi(threads) : 4;
+    if(config.model_config.num_threads < 1) config.model_config.num_threads = 1;
+
+    config.decoding_method = "greedy_search";
+
+    return SherpaOnnxCreateOfflineRecognizer(&config);
+}
+
+// Installs (or with NULL, removes) the refine recognizer
+static void sherpa_swap_refine(asr_thread data, const SherpaOnnxOfflineRecognizer *recognizer, bool cased) {
+    g_mutex_lock(&data->refine_mutex);
+    const SherpaOnnxOfflineRecognizer *old = data->refine_recognizer;
+    data->refine_recognizer = recognizer;
+    data->refine_cased = cased;
+    if(data->sherpa_recognizer != NULL)
+        data->line.preserve_case = data->sherpa_cased || (recognizer != NULL && cased);
+    g_mutex_unlock(&data->refine_mutex);
+
+    if(old != NULL) SherpaOnnxDestroyOfflineRecognizer(old);
+}
+
+struct refine_load {
+    asr_thread data;
+    char *dir;
+    gint generation;
+};
+
+static gpointer refine_load_thread(gpointer userdata) {
+    struct refine_load *load = userdata;
+
+    const SherpaOnnxOfflineRecognizer *recognizer = sherpa_create_refine_recognizer(load->dir);
+    g_autofree char *tokens = g_build_filename(load->dir, "tokens.txt", NULL);
+    bool cased = sherpa_tokens_are_cased(tokens);
+
+    if(recognizer == NULL) {
+        printf("sherpa-onnx: failed to load refine model %s\n", load->dir);
+    } else if(g_atomic_int_get(&load->data->refine_generation) != load->generation) {
+        // A newer request (or a disable) came in while this was loading
+        SherpaOnnxDestroyOfflineRecognizer(recognizer);
+    } else {
+        sherpa_swap_refine(load->data, recognizer, cased);
+        printf("Refining finished lines with %s\n", load->dir);
+    }
+
+    g_free(load->dir);
+    g_free(load);
+    return NULL;
+}
+
 #endif // LIVE_CAPTIONS_SHERPA
+
+void asr_thread_set_refine_model(asr_thread thread, const char *model_path) {
+#ifdef LIVE_CAPTIONS_SHERPA
+    gint generation = g_atomic_int_add(&thread->refine_generation, 1) + 1;
+
+    g_autofree char *dir = sherpa_model_dir(model_path);
+    if(dir == NULL) {
+        sherpa_swap_refine(thread, NULL, false);
+        return;
+    }
+
+    // Loading takes a few seconds; do it off the UI thread
+    struct refine_load *load = g_new0(struct refine_load, 1);
+    load->data = thread;
+    load->dir = g_steal_pointer(&dir);
+    load->generation = generation;
+    g_thread_unref(g_thread_new("lcap-refine-load", refine_load_thread, load));
+#else
+    (void)thread;
+    (void)model_path;
+#endif
+}
 
 static bool using_sherpa(asr_thread thread) {
 #ifdef LIVE_CAPTIONS_SHERPA
@@ -628,6 +830,9 @@ float asr_thread_get_speedup(asr_thread thread) {
     if(using_sherpa(thread)) {
         // Report backlog the same way April reports how much it must speed up
         float queued = g_atomic_int_get(&thread->sherpa_queued_samples) / (float)SHERPA_SAMPLE_RATE;
+        // The refine pass pauses live decoding briefly at each sentence end;
+        // that short backlog is expected and caught up right after
+        if(thread->refine_recognizer != NULL) queued = (queued > 1.0f) ? queued - 1.0f : 0.0f;
         return 1.0f + queued / 2.0f;
     }
 #endif
@@ -744,6 +949,8 @@ asr_thread create_asr_thread(const char *model_path){
 
 #ifdef LIVE_CAPTIONS_SHERPA
     data->sherpa_queue = g_async_queue_new();
+    g_mutex_init(&data->refine_mutex);
+    data->utterance_audio = g_array_new(FALSE, FALSE, sizeof(float));
 #endif
 
     if(!asr_thread_update_model(data, model_path)){
@@ -921,6 +1128,9 @@ void free_asr_thread(asr_thread thread) {
 #ifdef LIVE_CAPTIONS_SHERPA
     sherpa_free_model(thread);
     g_async_queue_unref(thread->sherpa_queue);
+    g_atomic_int_inc(&thread->refine_generation);
+    sherpa_swap_refine(thread, NULL, false);
+    g_array_unref(thread->utterance_audio);
 #endif
 
     g_thread_unref(thread->thread_id); // ?

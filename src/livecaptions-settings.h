@@ -56,6 +56,8 @@ struct _LiveCaptionsSettings {
 
     AdwComboRow *desktop_source_row;
     AdwComboRow *microphone_source_row;
+
+    AdwSwitchRow *refine_switch;
 };
 
 G_BEGIN_DECLS

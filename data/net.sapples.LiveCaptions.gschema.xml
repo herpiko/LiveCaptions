@@ -41,6 +41,11 @@
             <summary>PulseAudio source used for microphone input (empty uses the default input)</summary>
         </key>
 
+        <key name="refine-finished-lines" type="b">
+            <default>true</default>
+            <summary>Re-transcribe each finished line with an installed Parakeet model for better accuracy</summary>
+        </key>
+
         <key name="transparent-window" type="b">
             <default>false</default>
             <summary>Make window transparent</summary>

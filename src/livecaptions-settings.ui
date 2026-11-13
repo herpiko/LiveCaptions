@@ -305,6 +305,18 @@
 
         <child>
           <object class="AdwPreferencesGroup">
+            <property name="title" translatable="yes">Accuracy</property>
+
+            <child>
+              <object class="AdwSwitchRow" id="refine_switch">
+                <property name="title" translatable="yes">Refine Finished Lines</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="AdwPreferencesGroup">
             <property name="title"></property>
 
             <child>
