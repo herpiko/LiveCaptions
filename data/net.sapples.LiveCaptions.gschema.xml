@@ -28,7 +28,7 @@
 
         <key name="microphone" type="b">
             <default>false</default>
-            <summary>Caption microphone input instead of desktop audio</summary>
+            <summary>Also caption microphone input, mixed with desktop audio</summary>
         </key>
 
         <key name="desktop-source" type="s">

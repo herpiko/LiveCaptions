@@ -34,23 +34,40 @@
 #include "audiocap-internal.h"
 #include "audiocap.h"
 
+#define MAX_INPUTS 2
+// Each input buffers at most 2 seconds while waiting to be mixed
+#define MIX_MAX_SAMPLES (2 * 16000)
+// If one input has 200 ms waiting and the other has nothing (e.g. a suspended
+// output's monitor), pass it through alone instead of waiting forever
+#define MIX_SOLO_SAMPLES (16000 / 5)
+
+struct pa_input {
+    audio_thread_pa parent;
+    const char *label;
+    char *requested;      // user-selected source, or NULL for the default
+    pa_stream *stream;
+    short buf[MIX_MAX_SAMPLES];
+    size_t len;
+};
+
 struct audio_thread_pa_i {
     asr_thread asr;
-    bool microphone;
+    bool microphone;      // also capture the microphone, mixed with desktop audio
     size_t sample_rate;
 
     char *sink_name;
     char *source_name;
 
-    // User-selected source, or NULL to use the default
-    char *requested_source;
     int requested_lookup; // 0 = pending, 1 = found, -1 = not found
 
     pa_threaded_mainloop *mainloop;
     pa_mainloop_api *mainloop_api;
     pa_context *context;
-    pa_stream *stream;
 
+    // inputs[0] is desktop audio; inputs[1] is the microphone when enabled
+    int n_inputs;
+    struct pa_input inputs[MAX_INPUTS];
+    short mix_out[MIX_MAX_SAMPLES];
 };
 
 static void context_state_cb(pa_context* context, void* userdata);
@@ -81,6 +98,77 @@ static void server_info_callback(pa_context *c, const pa_server_info *i, void *u
     strcat(data->sink_name, ".monitor");
 
     pa_threaded_mainloop_signal(data->mainloop, 0);
+}
+
+// Returns the user-selected source if it currently exists, otherwise the
+// fallback, so an unplugged device doesn't break captioning.
+// Must be called with the mainloop locked.
+static const char *resolve_source(audio_thread_pa data, const char *requested, const char *fallback) {
+    if(requested == NULL) return fallback;
+
+    data->requested_lookup = 0;
+    pa_operation *op = pa_context_get_source_info_by_name(data->context,
+        requested, requested_source_info_cb, data);
+    if(op != NULL) {
+        while(pa_operation_get_state(op) == PA_OPERATION_RUNNING)
+            pa_threaded_mainloop_wait(data->mainloop);
+        pa_operation_unref(op);
+    }
+
+    if(data->requested_lookup == 1) return requested;
+
+    printf("Audio source %s not found, using default\n", requested);
+    return fallback;
+}
+
+// Creates, connects and starts a recording stream for one input.
+// dev_name NULL means the default input device.
+// Must be called with the mainloop locked.
+static void open_input(audio_thread_pa data, struct pa_input *input, const char *dev_name) {
+    pa_sample_spec sample_specifications;
+    sample_specifications.format = PA_SAMPLE_S16LE;
+    sample_specifications.rate = data->sample_rate;
+    sample_specifications.channels = 1;
+
+    pa_channel_map map;
+    pa_channel_map_init_mono(&map);
+
+    input->stream = pa_stream_new(data->context, input->label, &sample_specifications, &map);
+    g_assert(input->stream);
+
+    pa_stream_set_state_callback(input->stream, stream_state_cb, data);
+    pa_stream_set_read_callback(input->stream, stream_read_cb, input);
+
+    // recommended settings, i.e. server uses sensible values
+    pa_buffer_attr buffer_attr;
+    buffer_attr.maxlength = (uint32_t) -1;
+    buffer_attr.tlength = (uint32_t) -1;
+    buffer_attr.prebuf = (uint32_t) -1;
+    buffer_attr.minreq = (uint32_t) -1;
+    buffer_attr.fragsize = pa_usec_to_bytes(50000, &sample_specifications);
+
+    // Settings copied as per the chromium browser source
+    pa_stream_flags_t stream_flags;
+    stream_flags = PA_STREAM_START_CORKED | PA_STREAM_INTERPOLATE_TIMING |
+        PA_STREAM_NOT_MONOTONIC | PA_STREAM_AUTO_TIMING_UPDATE |
+        PA_STREAM_ADJUST_LATENCY;
+
+    assert(pa_stream_connect_record(input->stream, dev_name, &buffer_attr, stream_flags) == 0);
+
+    // Wait for the stream to be ready
+    for(;;) {
+        pa_stream_state_t stream_state = pa_stream_get_state(input->stream);
+        assert(PA_STREAM_IS_GOOD(stream_state));
+        if (stream_state == PA_STREAM_READY) break;
+        pa_threaded_mainloop_wait(data->mainloop);
+    }
+
+    // Uncork the stream so it will start recording
+    pa_stream_cork(input->stream, 0, stream_success_cb, data);
+    for(;;) {
+        if (pa_stream_is_corked(input->stream) == 0) break;
+        pa_threaded_mainloop_wait(data->mainloop);
+    }
 }
 
 void *run_audio_thread_pa(void *userdata) {
@@ -117,71 +205,13 @@ void *run_audio_thread_pa(void *userdata) {
         pa_threaded_mainloop_wait(data->mainloop);
     }
 
-    // Create a recording stream
-    pa_sample_spec sample_specifications;
-    sample_specifications.format = PA_SAMPLE_S16LE;
-    sample_specifications.rate = data->sample_rate;
-    sample_specifications.channels = 1;
+    // Desktop audio is always captured; the microphone is added to it
+    open_input(data, &data->inputs[0],
+        resolve_source(data, data->inputs[0].requested, data->sink_name));
 
-    pa_channel_map map;
-    pa_channel_map_init_mono(&map);
-
-    data->stream = pa_stream_new(data->context, "Record", &sample_specifications, &map);
-    g_assert(data->stream);
-
-    pa_stream_set_state_callback(data->stream, stream_state_cb, data);
-    pa_stream_set_read_callback(data->stream, stream_read_cb, data);
-
-    // recommended settings, i.e. server uses sensible values
-    pa_buffer_attr buffer_attr;
-    buffer_attr.maxlength = (uint32_t) -1;
-    buffer_attr.tlength = (uint32_t) -1;
-    buffer_attr.prebuf = (uint32_t) -1;
-    buffer_attr.minreq = (uint32_t) -1;
-    buffer_attr.fragsize = pa_usec_to_bytes(50000, &sample_specifications);
-
-    // Settings copied as per the chromium browser source
-    pa_stream_flags_t stream_flags;
-    stream_flags = PA_STREAM_START_CORKED | PA_STREAM_INTERPOLATE_TIMING |
-        PA_STREAM_NOT_MONOTONIC | PA_STREAM_AUTO_TIMING_UPDATE |
-        PA_STREAM_ADJUST_LATENCY;
-
-    const char *dev_name = data->microphone ? NULL : data->sink_name;
-
-    // Use the user-selected source if it currently exists, otherwise fall back
-    // to the default so an unplugged device doesn't break captioning.
-    if(data->requested_source != NULL) {
-        data->requested_lookup = 0;
-        pa_operation *op = pa_context_get_source_info_by_name(data->context,
-            data->requested_source, requested_source_info_cb, data);
-        if(op != NULL) {
-            while(pa_operation_get_state(op) == PA_OPERATION_RUNNING)
-                pa_threaded_mainloop_wait(data->mainloop);
-            pa_operation_unref(op);
-        }
-
-        if(data->requested_lookup == 1) {
-            dev_name = data->requested_source;
-        } else {
-            printf("Audio source %s not found, using default\n", data->requested_source);
-        }
-    }
-    assert(pa_stream_connect_record(data->stream, dev_name, &buffer_attr, stream_flags) == 0);
-
-    // Wait for the stream to be ready
-    for(;;) {
-        pa_stream_state_t stream_state = pa_stream_get_state(data->stream);
-        assert(PA_STREAM_IS_GOOD(stream_state));
-        if (stream_state == PA_STREAM_READY) break;
-        pa_threaded_mainloop_wait(data->mainloop);
-    }
-
-    // Uncork the stream so it will start recording
-    pa_stream_cork(data->stream, 0, stream_success_cb, data);
-    for(;;) {
-        if (pa_stream_is_corked(data->stream) == 0) break;
-        pa_threaded_mainloop_wait(data->mainloop);
-    }
+    if(data->microphone)
+        open_input(data, &data->inputs[1],
+            resolve_source(data, data->inputs[1].requested, NULL));
 
     pa_threaded_mainloop_unlock(data->mainloop);
 
@@ -198,8 +228,42 @@ static void stream_state_cb(pa_stream *s, void *userdata) {
     pa_threaded_mainloop_signal(data->mainloop, 0);
 }
 
+static void input_consume(struct pa_input *input, size_t n) {
+    memmove(input->buf, input->buf + n, (input->len - n) * sizeof(short));
+    input->len -= n;
+}
+
+// Mixes whatever both inputs have available and sends it to the ASR thread.
+// All read callbacks run on the PulseAudio mainloop thread, so no locking.
+static void mix_and_send(audio_thread_pa data) {
+    struct pa_input *a = &data->inputs[0];
+    struct pa_input *b = &data->inputs[1];
+
+    size_t n = MIN(a->len, b->len);
+    if(n > 0) {
+        for(size_t i = 0; i < n; i++) {
+            int s = (int)a->buf[i] + (int)b->buf[i];
+            data->mix_out[i] = (short)CLAMP(s, -32768, 32767);
+        }
+        if(data->asr != NULL) asr_thread_enqueue_audio(data->asr, data->mix_out, n);
+        input_consume(a, n);
+        input_consume(b, n);
+    }
+
+    // One input stalled (nothing playing, suspended device): don't hold up the other
+    struct pa_input *pairs[2][2] = { { a, b }, { b, a } };
+    for(int k = 0; k < 2; k++) {
+        struct pa_input *x = pairs[k][0], *y = pairs[k][1];
+        if(y->len == 0 && x->len >= MIX_SOLO_SAMPLES) {
+            if(data->asr != NULL) asr_thread_enqueue_audio(data->asr, x->buf, x->len);
+            x->len = 0;
+        }
+    }
+}
+
 static void stream_read_cb(pa_stream *stream, size_t nbytes, void *userdata) {
-    audio_thread_pa data = (audio_thread_pa)userdata;
+    struct pa_input *input = userdata;
+    audio_thread_pa data = input->parent;
 
     ssize_t nbytes1 = (ssize_t)nbytes;
     while(nbytes1 > 0) {
@@ -220,8 +284,19 @@ static void stream_read_cb(pa_stream *stream, size_t nbytes, void *userdata) {
             return;
         }
 
-        if(data->asr != NULL){
-            asr_thread_enqueue_audio(data->asr, (short *)audio_data, count/2);
+        size_t samples = count / 2;
+        if(data->n_inputs == 1) {
+            if(data->asr != NULL)
+                asr_thread_enqueue_audio(data->asr, (short *)audio_data, samples);
+        } else {
+            // Keep the newest audio if the buffer is somehow full
+            if(samples > MIX_MAX_SAMPLES) samples = MIX_MAX_SAMPLES;
+            if(input->len + samples > MIX_MAX_SAMPLES)
+                input_consume(input, input->len + samples - MIX_MAX_SAMPLES);
+            memcpy(input->buf + input->len, audio_data, samples * sizeof(short));
+            input->len += samples;
+
+            mix_and_send(data);
         }
 
         pa_stream_drop(stream);
@@ -236,26 +311,39 @@ static void stream_success_cb(pa_stream *stream, int success, void *userdata) {
 }
 
 
-audio_thread_pa create_audio_thread_pa(bool microphone, const char *source_name, asr_thread asr) {
+audio_thread_pa create_audio_thread_pa(bool microphone, const char *desktop_source,
+                                       const char *microphone_source, asr_thread asr) {
     audio_thread_pa data = calloc(1, sizeof(struct audio_thread_pa_i));
 
     data->microphone = microphone;
-    if(source_name != NULL && source_name[0] != '\0')
-        data->requested_source = g_strdup(source_name);
+    data->n_inputs = microphone ? 2 : 1;
     data->asr = asr;
     data->sample_rate = asr_thread_samplerate(asr);
+
+    const char *requested[MAX_INPUTS] = { desktop_source, microphone_source };
+    const char *labels[MAX_INPUTS] = { "Desktop audio", "Microphone" };
+    for(int i = 0; i < MAX_INPUTS; i++) {
+        data->inputs[i].parent = data;
+        data->inputs[i].label = labels[i];
+        if(requested[i] != NULL && requested[i][0] != '\0')
+            data->inputs[i].requested = g_strdup(requested[i]);
+    }
 
     return data;
 }
 
 
 void free_audio_thread_pa(audio_thread_pa thread){
-    // Cork the stream
+    // Cork the streams
     pa_threaded_mainloop_lock(thread->mainloop);
-    pa_stream_cork(thread->stream, 1, stream_success_cb, thread);
-    for(;;) {
-        if (pa_stream_is_corked(thread->stream) == 1) break;
-        pa_threaded_mainloop_wait(thread->mainloop);
+    for(int i = 0; i < thread->n_inputs; i++) {
+        pa_stream *stream = thread->inputs[i].stream;
+        if(stream == NULL) continue;
+        pa_stream_cork(stream, 1, stream_success_cb, thread);
+        for(;;) {
+            if (pa_stream_is_corked(stream) == 1) break;
+            pa_threaded_mainloop_wait(thread->mainloop);
+        }
     }
     pa_threaded_mainloop_unlock(thread->mainloop);
 
@@ -263,8 +351,11 @@ void free_audio_thread_pa(audio_thread_pa thread){
     pa_threaded_mainloop_stop(thread->mainloop);
 
     // Disconnect and free everything
-    pa_stream_disconnect(thread->stream);
-    pa_stream_unref(thread->stream);
+    for(int i = 0; i < thread->n_inputs; i++) {
+        if(thread->inputs[i].stream == NULL) continue;
+        pa_stream_disconnect(thread->inputs[i].stream);
+        pa_stream_unref(thread->inputs[i].stream);
+    }
 
     pa_context_disconnect(thread->context);
     pa_context_unref(thread->context);
@@ -273,7 +364,7 @@ void free_audio_thread_pa(audio_thread_pa thread){
 
     free(thread->sink_name);
     free(thread->source_name);
-    g_free(thread->requested_source);
+    for(int i = 0; i < MAX_INPUTS; i++) g_free(thread->inputs[i].requested);
 }
 
 

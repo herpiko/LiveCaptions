@@ -26,9 +26,12 @@
 struct audio_thread_i;
 typedef struct audio_thread_i * audio_thread;
 
-// source_name: PulseAudio source to record from. NULL or "" uses the default
-// (the default output's monitor for desktop audio, the default input for microphone).
-audio_thread create_audio_thread(bool microphone, const char *source_name, asr_thread asr);
+// Desktop audio is always captured; with microphone=true the microphone is
+// mixed in as well. desktop_source / microphone_source are PulseAudio source
+// names; NULL or "" uses the default (the default output's monitor for
+// desktop audio, the default input for the microphone).
+audio_thread create_audio_thread(bool microphone, const char *desktop_source,
+                                 const char *microphone_source, asr_thread asr);
 void free_audio_thread(audio_thread thread);
 
 typedef struct {
