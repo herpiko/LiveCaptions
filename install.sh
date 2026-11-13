@@ -7,13 +7,16 @@
 #
 # Run it as your normal user: it asks for your password (sudo) only for the
 # final install step. Downloads (about 1.5 GB, mostly models) are kept in
-# .deps/ so running it again is quick.
+# ~/.cache/livecaptions-install so running it again is quick.
 set -eu
 
 cd "$(dirname "$0")"
 ROOT=$(pwd)
 PREFIX=${PREFIX:-/usr/local}
-DEPS="$ROOT/.deps"
+# Outside the source tree on purpose: meson drops include paths that point
+# into the source tree from the CMake-built April subproject, which then
+# can't find the ONNX Runtime headers.
+DEPS="${LIVECAPTIONS_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/livecaptions-install}"
 BUILD="$ROOT/build"
 
 SHERPA_VERSION=v2.0.1

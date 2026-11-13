@@ -43,7 +43,7 @@ Thanks to Fangjun Kuang for the [pretrained model](https://huggingface.co/csukua
 
 # Installing from source (sherpa-onnx models)
 
-On Linux x86-64, `./install.sh` downloads sherpa-onnx, ONNX Runtime and the speech models (about 1.5 GB, cached in `.deps/`), builds Live Captions and installs it under `/usr/local`. Run it as your normal user; it asks for your password only for the final install step. Set `PREFIX` to install elsewhere.
+On Linux x86-64, `./install.sh` downloads sherpa-onnx, ONNX Runtime and the speech models (about 1.5 GB, cached in `~/.cache/livecaptions-install`), builds Live Captions and installs it under `/usr/local`. Run it as your normal user; it asks for your password only for the final install step. Set `PREFIX` to install elsewhere.
 
 ```sh
 ./install.sh
