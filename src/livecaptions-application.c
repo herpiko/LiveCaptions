@@ -419,9 +419,9 @@ static void livecaptions_application_init(LiveCaptionsApplication *self) {
 
     self->mic_action = mic_action;
 
-    // Not persisted: Live Captions always starts listening
-    self->listening = TRUE;
-    g_autoptr(GSimpleAction) listen_action = g_simple_action_new_stateful("listening", NULL, g_variant_new_boolean(TRUE));
+    // Opens paused unless the user chose to start listening right away
+    self->listening = g_settings_get_boolean(self->settings, "listen-on-start");
+    g_autoptr(GSimpleAction) listen_action = g_simple_action_new_stateful("listening", NULL, g_variant_new_boolean(self->listening));
     g_signal_connect(listen_action, "change-state", G_CALLBACK(livecaptions_application_toggle_listening), self);
     g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(listen_action));
     self->listen_action = listen_action;

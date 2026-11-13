@@ -15,6 +15,19 @@
 
         <child>
           <object class="AdwPreferencesGroup">
+            <property name="title" translatable="yes">Startup</property>
+
+            <child>
+              <object class="AdwSwitchRow" id="listen_on_start_switch">
+                <property name="title" translatable="yes">Start Listening When Opened</property>
+                <property name="subtitle" translatable="yes">When off, Live Captions opens paused; press the play button to start</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="AdwPreferencesGroup">
             <property name="title" translatable="yes">Keep Above</property>
 
             <child>

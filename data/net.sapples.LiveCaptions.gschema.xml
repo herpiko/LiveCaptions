@@ -66,6 +66,11 @@
             <summary>Expected spoken languages for OpenAI, comma-separated ISO-639-1 codes (empty detects any language)</summary>
         </key>
 
+        <key name="listen-on-start" type="b">
+            <default>false</default>
+            <summary>Start listening as soon as Live Captions opens (otherwise it opens paused)</summary>
+        </key>
+
         <key name="transparent-window" type="b">
             <default>false</default>
             <summary>Make window transparent</summary>

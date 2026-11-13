@@ -320,6 +320,7 @@ static void livecaptions_settings_class_init(LiveCaptionsSettingsClass *klass) {
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, filter_slurs_switch);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, save_history_switch);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, keep_above_switch);
+    gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, listen_on_start_switch);
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, text_stream_switch);
 
     gtk_widget_class_bind_template_child (widget_class, LiveCaptionsSettings, line_width_scale);
@@ -699,6 +700,7 @@ static void livecaptions_settings_init(LiveCaptionsSettings *self) {
     g_settings_bind(self->settings, "line-width", self->line_width_adjustment, "value", G_SETTINGS_BIND_DEFAULT);
     g_settings_bind(self->settings, "window-transparency", self->window_transparency_adjustment, "value", G_SETTINGS_BIND_DEFAULT);
     g_settings_bind(self->settings, "text-stream-active", self->text_stream_switch, "active", G_SETTINGS_BIND_DEFAULT);
+    g_settings_bind(self->settings, "listen-on-start", self->listen_on_start_switch, "active", G_SETTINGS_BIND_DEFAULT);
 
     g_settings_bind(self->settings, "font-name", self->font_button, "font", G_SETTINGS_BIND_DEFAULT);
 
